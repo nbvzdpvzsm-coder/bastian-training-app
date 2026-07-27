@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <title>Bastian Training</title>
+  <meta name="theme-color" content="#12161f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Training" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app"></div>
+
+  <nav id="bottom-nav" class="bottom-nav">
+    <button class="nav-btn" data-route="dashboard" aria-label="Dashboard">
+      <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10Zm10 8h8V3h-8v18ZM3 21h8v-6H3v6Z"/></svg>
+      <span>Dashboard</span>
+    </button>
+    <button class="nav-btn" data-route="train" aria-label="Training">
+      <svg viewBox="0 0 24 24"><path d="M20.57 14.86 22 13.43 20.57 12l-1.75 1.75-2.02-2.02 1.75-1.75L17.14 8.6l-1.75 1.75-2.02-2.02 1.75-1.75L13.71 5.16l-1.75 1.75L9.94 4.89l1.75-1.75L10.29 1.7 4.89 7.1l1.42 1.42 1.75-1.75 2.02 2.02-1.75 1.75 1.42 1.42 1.75-1.75 2.02 2.02-1.75 1.75 1.42 1.42 1.75-1.75 2.02 2.02-1.75 1.75L14.86 20.57l5.71-5.71Z"/></svg>
+      <span>Training</span>
+    </button>
+    <button class="nav-btn" data-route="body" aria-label="Körper">
+      <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm0 8c-3.31 0-6 1.79-6 4v8h2v-6h1v6h6v-6h1v6h2v-8c0-2.21-2.69-4-6-4Z"/></svg>
+      <span>Körper</span>
+    </button>
+    <button class="nav-btn" data-route="history" aria-label="Verlauf">
+      <svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3Zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12Z"/></svg>
+      <span>Verlauf</span>
+    </button>
+    <button class="nav-btn" data-route="settings" aria-label="Einstellungen">
+      <svg viewBox="0 0 24 24"><path d="M19.14 12.94a7.14 7.14 0 0 0 .06-.94 7.14 7.14 0 0 0-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.62-.06.94s.02.63.06.94L2.83 14.5a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.42.32.6.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54c.05.24.26.42.5.42h3.84c.24 0 .45-.18.5-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.24.1.46 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.56ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg>
+      <span>Mehr</span>
+    </button>
+  </nav>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
