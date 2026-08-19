@@ -1,5 +1,5 @@
 import { PLAN, getDay } from "./data.js";
-import { getExerciseTarget, saveSessionLog, getLastSessionForExercise, getLastSessionsForDay, getRecentChanges } from "./store.js";
+import { getExerciseTarget, saveSessionLog, getLastSessionsForDay, getRecentChanges, getExerciseHistory } from "./store.js";
 import { updateTargetAfterSession } from "./progression.js";
 import { el, repLabel, loadUnitLabel, formatRelative } from "./utils.js";
 import { showRestTimer, playIntervalProgram } from "./timer.js";
@@ -41,31 +41,71 @@ function needsWeightInput(loadType) {
   return ["barbell", "dumbbell", "kettlebell", "bodyweight_loaded"].includes(loadType);
 }
 
-function targetHint(exercise, movement) {
-  const target = getExerciseTarget(exercise.id);
-  const last = getLastSessionForExercise(exercise.id);
+// Nach Satzabschluss vergehen realistisch ~15 Sek für Ausführung + Eintragen, bevor die eigentliche
+// Erholung beginnt — die angezeigte Pause wird daher um diesen Betrag verkürzt.
+function effectiveRestSeconds(pauseSeconds) {
+  return Math.max(0, (pauseSeconds || 60) - 15);
+}
+
+function getLastMovementSets(recordId, movementIdx) {
+  const history = getExerciseHistory(recordId, 1);
+  return history[0]?.movements?.[movementIdx]?.sets || null;
+}
+
+function targetHint(recordId, movement) {
+  const target = getExerciseTarget(recordId);
+  const last = getLastMovementSets(recordId, 0);
   const parts = [];
   if (target?.weightKg != null) parts.push(`Ziel: ${target.weightKg} kg`);
   else if (last) {
-    const w = last.movements?.[0]?.sets?.slice(-1)[0]?.weight;
+    const w = last.slice(-1)[0]?.weight;
     if (w != null) parts.push(`Zuletzt: ${w} kg`);
   }
   parts.push(repLabel(movement));
   return parts.join(" · ");
 }
 
-function buildSetRows(exercise, movement, movementIdx, state) {
+// Trägt den Wert von Satz 1 automatisch in alle noch nicht manuell bearbeiteten Folgesätze ein
+// (Zeitersparnis), bleibt aber pro Satz überschreibbar — sobald ein Satz manuell geändert wird,
+// wird er nicht mehr automatisch überschrieben.
+function wireFirstSetPropagation(rows, pristine) {
+  const first = rows[0];
+  if (!first) return;
+  const propagate = () => {
+    pristine.forEach((idx) => {
+      const row = rows[idx];
+      if (!row) return;
+      if (row.weightInput && first.weightInput) row.weightInput.value = first.weightInput.value;
+      if (row.repsInput && first.repsInput) row.repsInput.value = first.repsInput.value;
+    });
+  };
+  first.weightInput?.addEventListener("input", propagate);
+  first.repsInput?.addEventListener("input", propagate);
+  rows.forEach((row, idx) => {
+    if (idx === 0) return;
+    const markDirty = () => pristine.delete(idx);
+    row.weightInput?.addEventListener("input", markDirty);
+    row.repsInput?.addEventListener("input", markDirty);
+  });
+}
+
+function buildSetRows(exercise, movement, movementIdx, state, recordId = exercise.id) {
+  const loadType = movement.loadType || exercise.loadType;
+  const showWeight = needsWeightInput(loadType);
   const wrap = el(`<table class="set-table"><thead><tr>
       <th></th>
-      ${needsWeightInput(movement.loadType || exercise.loadType) ? `<th>${loadUnitLabel(movement.loadType || exercise.loadType)}</th>` : ""}
+      ${showWeight ? `<th>${loadUnitLabel(loadType)}</th>` : ""}
       <th>Wdh.</th>
       <th></th>
     </tr></thead><tbody></tbody></table>`);
   const tbody = wrap.querySelector("tbody");
-  const showWeight = needsWeightInput(movement.loadType || exercise.loadType);
-  const target = getExerciseTarget(exercise.id);
+  const target = getExerciseTarget(recordId);
+  const lastSets = getLastMovementSets(recordId, movementIdx);
+  const pristine = new Set();
+  const rows = [];
 
   for (let i = 0; i < movement.sets; i++) {
+    const lastSet = lastSets?.[i];
     const row = el(`
       <tr class="set-row">
         <td class="set-idx">${i + 1}</td>
@@ -77,27 +117,32 @@ function buildSetRows(exercise, movement, movementIdx, state) {
     tbody.appendChild(row);
 
     const weightInput = row.querySelector('[data-role="weight"]');
-    if (weightInput && target?.weightKg != null) weightInput.value = target.weightKg;
+    const repsInput = row.querySelector('[data-role="reps"]');
+    const prefWeight = lastSet?.weight ?? target?.weightKg ?? null;
+    if (weightInput && prefWeight != null) weightInput.value = prefWeight;
+    if (lastSet?.reps != null) repsInput.value = lastSet.reps;
+    if (i > 0) pristine.add(i);
+    rows.push({ weightInput, repsInput });
 
     const checkBtn = row.querySelector('[data-role="check"]');
     checkBtn.addEventListener("click", () => {
-      const repsVal = row.querySelector('[data-role="reps"]').value;
+      const repsVal = repsInput.value;
       const weightVal = weightInput ? weightInput.value : null;
       if (!repsVal) {
-        row.querySelector('[data-role="reps"]').focus();
+        repsInput.focus();
         return;
       }
-      state.entries[exercise.id] = state.entries[exercise.id] || { movements: exercise.movements.map(() => ({ sets: [] })) };
-      state.entries[exercise.id].movements[movementIdx].sets[i] = {
+      state.entries[recordId] = state.entries[recordId] || { movements: exercise.movements.map(() => ({ sets: [] })) };
+      state.entries[recordId].movements[movementIdx].sets[i] = {
         reps: Number(repsVal),
         weight: weightVal ? Number(weightVal) : null,
       };
       checkBtn.classList.add("done");
       checkBtn.disabled = true;
+      pristine.delete(i);
       const isLast = i === movement.sets - 1;
       if (!isLast) {
-        const pauseSec = exercise.pauseSeconds || 60;
-        showRestTimer(pauseSec, {
+        showRestTimer(effectiveRestSeconds(exercise.pauseSeconds), {
           label: `Pause · ${exercise.name}`,
           onDone: () => {
             const nextRow = tbody.children[i + 1];
@@ -107,6 +152,7 @@ function buildSetRows(exercise, movement, movementIdx, state) {
       }
     });
   }
+  wireFirstSetPropagation(rows, pristine);
   return wrap;
 }
 
@@ -125,7 +171,7 @@ function singleExerciseCard(exercise, state) {
 
   exercise.movements.forEach((movement, idx) => {
     if (movement.name) card.appendChild(el(`<div style="font-size:13px;font-weight:700;color:var(--text-dim);margin:10px 0 4px">${movement.name}</div>`));
-    card.appendChild(el(`<div style="font-size:12px;color:var(--text-faint);margin-bottom:4px">${targetHint(exercise, movement)}</div>`));
+    card.appendChild(el(`<div style="font-size:12px;color:var(--text-faint);margin-bottom:4px">${targetHint(exercise.id, movement)}</div>`));
     card.appendChild(buildSetRows(exercise, movement, idx, state));
   });
 
@@ -134,11 +180,130 @@ function singleExerciseCard(exercise, state) {
   return card;
 }
 
-// Superset-Paare (A1→A2, B1→B2 etc.) werden als eine Karte mit rundenweiser Eingabe gerendert,
-// aber weiterhin unter zwei eigenen Übungs-IDs geloggt/progressiert.
-function supersetCard(ex1, ex2, state) {
-  const card = el(`<div class="card card-accent-${ex1.badgeColor}"></div>`);
-  card.appendChild(el(`
+// Rundenbasierte Karte für Supersätze: pro Runde wird jede Teilübung nacheinander ausgeführt und erst
+// NACH der letzten Teilübung der Runde beginnt die Erholungspause. Deckt sowohl A1→A2-Paare (zwei eigene
+// Übungs-IDs) als auch Karten mit mehreren Bewegungen einer Übung (z. B. Seitheben + Face Pull) ab.
+function renderRoundBasedCard({ parts, pauseSeconds, headerHtml, footerHtml, accentColor, state, pauseLabelText }) {
+  const card = el(`<div class="card card-accent-${accentColor}"></div>`);
+  card.appendChild(el(headerHtml));
+
+  const seenRecords = new Set();
+  parts.forEach((p) => {
+    if (seenRecords.has(p.recordId)) return;
+    seenRecords.add(p.recordId);
+    state.entries[p.recordId] = state.entries[p.recordId] || { movements: Array.from({ length: p.totalMovements }, () => ({ sets: [] })) };
+  });
+
+  const hints = parts.map((p) => `${p.label}: ${targetHint(p.recordId, p.movement)}`).join("  ·  ");
+  card.appendChild(el(`<div style="font-size:12px;color:var(--text-faint);margin-bottom:4px">${hints}</div>`));
+
+  const rounds = Math.max(...parts.map((p) => p.movement.sets));
+  const table = el(`<table class="set-table"><thead><tr>
+      <th></th>
+      ${parts
+        .map((p) => (needsWeightInput(p.loadType) ? `<th>${p.label} kg</th><th>${p.label} Wdh.</th>` : `<th>${p.label} Wdh.</th>`))
+        .join("")}
+      <th></th>
+    </tr></thead><tbody></tbody></table>`);
+  const tbody = table.querySelector("tbody");
+
+  const partsState = parts.map((p) => ({ pristine: new Set(), rows: [], lastSets: getLastMovementSets(p.recordId, p.movementIdx), target: getExerciseTarget(p.recordId) }));
+
+  for (let i = 0; i < rounds; i++) {
+    const row = el(`<tr class="set-row"><td class="set-idx">${i + 1}</td></tr>`);
+    const checkCell = document.createElement("td");
+    const cellsBeforeCheck = [];
+
+    parts.forEach((p, pIdx) => {
+      const active = i < p.movement.sets;
+      const showWeight = needsWeightInput(p.loadType);
+      const ps = partsState[pIdx];
+      const lastSet = active ? ps.lastSets?.[i] : null;
+      let weightInput = null;
+      if (showWeight) {
+        const td = document.createElement("td");
+        weightInput = document.createElement("input");
+        weightInput.className = "num-input";
+        weightInput.type = "number";
+        weightInput.step = "0.5";
+        weightInput.inputMode = "decimal";
+        if (!active) weightInput.disabled = true;
+        weightInput.placeholder = ps.target?.weightKg ?? "–";
+        const prefWeight = lastSet?.weight ?? ps.target?.weightKg ?? null;
+        if (prefWeight != null) weightInput.value = prefWeight;
+        td.appendChild(weightInput);
+        cellsBeforeCheck.push(td);
+      }
+      const repsTd = document.createElement("td");
+      const repsInput = document.createElement("input");
+      repsInput.className = "num-input";
+      repsInput.type = "number";
+      repsInput.inputMode = "numeric";
+      if (!active) repsInput.disabled = true;
+      repsInput.placeholder = p.movement.repType === "range" ? p.movement.repMax : p.movement.repFixed || "";
+      if (lastSet?.reps != null) repsInput.value = lastSet.reps;
+      repsTd.appendChild(repsInput);
+      cellsBeforeCheck.push(repsTd);
+
+      if (active) {
+        if (i > 0) ps.pristine.add(i);
+        ps.rows.push({ weightInput, repsInput });
+      }
+    });
+
+    cellsBeforeCheck.forEach((td) => row.appendChild(td));
+
+    const checkBtn = el(`<button class="set-check" type="button">✓</button>`);
+    checkCell.appendChild(checkBtn);
+    row.appendChild(checkCell);
+    tbody.appendChild(row);
+
+    checkBtn.addEventListener("click", () => {
+      // partsState[pIdx].rows wird pro Teilübung nur für aktive Runden befüllt (fortlaufend, ohne Lücken),
+      // daher entspricht Index i in dieser Liste genau der aktuellen Runde.
+      const activeEntries = parts.map((p, pIdx) => (i < p.movement.sets ? partsState[pIdx].rows[i] : null));
+      const firstMissing = activeEntries.find((e) => e && !e.repsInput.value);
+      if (firstMissing) {
+        firstMissing.repsInput.focus();
+        return;
+      }
+      parts.forEach((p, pIdx) => {
+        if (i >= p.movement.sets) return;
+        const entry = activeEntries[pIdx];
+        state.entries[p.recordId].movements[p.movementIdx].sets[i] = {
+          reps: Number(entry.repsInput.value),
+          weight: entry.weightInput?.value ? Number(entry.weightInput.value) : null,
+        };
+        partsState[pIdx].pristine.delete(i);
+      });
+      checkBtn.classList.add("done");
+      checkBtn.disabled = true;
+      const isLast = i === rounds - 1;
+      if (!isLast) {
+        showRestTimer(effectiveRestSeconds(pauseSeconds), {
+          label: pauseLabelText,
+          onDone: () => {
+            const nextRow = tbody.children[i + 1];
+            nextRow?.querySelector("input:not(:disabled)")?.focus();
+          },
+        });
+      }
+    });
+  }
+
+  parts.forEach((p, pIdx) => wireFirstSetPropagation(partsState[pIdx].rows, partsState[pIdx].pristine));
+
+  card.appendChild(table);
+  card.appendChild(el(footerHtml));
+  return card;
+}
+
+function chainPairCard(ex1, ex2, state) {
+  const parts = [
+    { recordId: ex1.id, movementIdx: 0, movement: ex1.movements[0], loadType: ex1.loadType, label: ex1.badge, totalMovements: 1 },
+    { recordId: ex2.id, movementIdx: 0, movement: ex2.movements[0], loadType: ex2.loadType, label: ex2.badge, totalMovements: 1 },
+  ];
+  const headerHtml = `
     <div class="ex-header">
       <div class="badge badge-${ex1.badgeColor}">${ex1.badge}</div>
       <div>
@@ -146,60 +311,47 @@ function supersetCard(ex1, ex2, state) {
         <div class="ex-cue">${ex1.cue}</div>
       </div>
     </div>
-  `));
+  `;
+  const footerHtml = `<div class="footer-note">→ ${ex1.footerNote}<br/>→ ${ex2.footerNote}<br/><span style="opacity:0.7">Danach ${ex2.pauseLabel} Pause</span></div>`;
+  return renderRoundBasedCard({
+    parts,
+    pauseSeconds: ex2.pauseSeconds,
+    headerHtml,
+    footerHtml,
+    accentColor: ex1.badgeColor,
+    state,
+    pauseLabelText: `Pause · ${ex1.name} + ${ex2.name}`,
+  });
+}
 
-  const m1 = ex1.movements[0];
-  const m2 = ex2.movements[0];
-  const rounds = Math.max(m1.sets, m2.sets);
-
-  state.entries[ex1.id] = state.entries[ex1.id] || { movements: [{ sets: [] }] };
-  state.entries[ex2.id] = state.entries[ex2.id] || { movements: [{ sets: [] }] };
-
-  const table = el(`<table class="set-table"><thead><tr>
-      <th></th>
-      <th>${ex1.badge} kg</th><th>${ex1.badge} Wdh.</th>
-      <th>${ex2.badge} kg</th><th>${ex2.badge} Wdh.</th>
-      <th></th>
-    </tr></thead><tbody></tbody></table>`);
-  const tbody = table.querySelector("tbody");
-
-  for (let i = 0; i < rounds; i++) {
-    const t1 = getExerciseTarget(ex1.id);
-    const t2 = getExerciseTarget(ex2.id);
-    const row = el(`
-      <tr class="set-row">
-        <td class="set-idx">${i + 1}</td>
-        <td><input class="num-input" inputmode="decimal" type="number" step="0.5" placeholder="${t1?.weightKg ?? "–"}" data-role="w1" /></td>
-        <td><input class="num-input" inputmode="numeric" type="number" placeholder="${m1.repMax || m1.repFixed || ""}" data-role="r1" /></td>
-        <td><input class="num-input" inputmode="decimal" type="number" step="0.5" placeholder="${t2?.weightKg ?? "–"}" data-role="w2" /></td>
-        <td><input class="num-input" inputmode="numeric" type="number" placeholder="${m2.repMax || m2.repFixed || ""}" data-role="r2" /></td>
-        <td><button class="set-check" type="button" data-role="check">✓</button></td>
-      </tr>
-    `);
-    tbody.appendChild(row);
-    row.querySelector('[data-role="w1"]').value = t1?.weightKg ?? "";
-    row.querySelector('[data-role="w2"]').value = t2?.weightKg ?? "";
-
-    row.querySelector('[data-role="check"]').addEventListener("click", () => {
-      const r1 = row.querySelector('[data-role="r1"]').value;
-      const r2 = row.querySelector('[data-role="r2"]').value;
-      if (!r1 || !r2) return;
-      state.entries[ex1.id].movements[0].sets[i] = { reps: Number(r1), weight: Number(row.querySelector('[data-role="w1"]').value) || null };
-      state.entries[ex2.id].movements[0].sets[i] = { reps: Number(r2), weight: Number(row.querySelector('[data-role="w2"]').value) || null };
-      row.querySelector('[data-role="check"]').classList.add("done");
-      row.querySelector('[data-role="check"]').disabled = true;
-      const isLast = i === rounds - 1;
-      if (!isLast) {
-        showRestTimer(ex2.pauseSeconds || 90, {
-          label: `Pause · ${ex1.name} + ${ex2.name}`,
-          onDone: () => tbody.children[i + 1]?.querySelector('[data-role="w1"], [data-role="r1"]')?.focus(),
-        });
-      }
-    });
-  }
-  card.appendChild(table);
-  card.appendChild(el(`<div class="footer-note">→ ${ex1.footerNote}<br/>→ ${ex2.footerNote}<br/><span style="opacity:0.7">Danach ${ex2.pauseLabel} Pause</span></div>`));
-  return card;
+function multiMovementCard(exercise, state) {
+  const parts = exercise.movements.map((m, idx) => ({
+    recordId: exercise.id,
+    movementIdx: idx,
+    movement: m,
+    loadType: m.loadType || exercise.loadType,
+    label: m.name || `Teil ${idx + 1}`,
+    totalMovements: exercise.movements.length,
+  }));
+  const headerHtml = `
+    <div class="ex-header">
+      <div class="badge badge-${exercise.badgeColor}">${exercise.badge}</div>
+      <div>
+        <div class="ex-name">${exercise.name}</div>
+        <div class="ex-cue">${exercise.cue}</div>
+      </div>
+    </div>
+  `;
+  const footerHtml = `<div class="footer-note">→ ${exercise.footerNote}<br/><span style="opacity:0.7">Pause: ${exercise.pauseLabel}</span></div>`;
+  return renderRoundBasedCard({
+    parts,
+    pauseSeconds: exercise.pauseSeconds,
+    headerHtml,
+    footerHtml,
+    accentColor: exercise.badgeColor,
+    state,
+    pauseLabelText: `Pause · ${exercise.name}`,
+  });
 }
 
 function buildRenderQueue(exercises) {
@@ -210,12 +362,12 @@ function buildRenderQueue(exercises) {
     if (ex.chainNext) {
       const partner = exercises.find((e) => e.id === ex.chainNext);
       if (partner) {
-        queue.push({ type: "superset", ex1: ex, ex2: partner });
+        queue.push({ type: "chainPair", ex1: ex, ex2: partner });
         skip.add(partner.id);
         return;
       }
     }
-    queue.push({ type: "single", ex });
+    queue.push({ type: ex.movements.length > 1 ? "multiMovement" : "single", ex });
   });
   return queue;
 }
@@ -228,7 +380,6 @@ function finishSession(day, state, container, navigate) {
   }
   saveSessionLog({ dayId: day.id, entries: state.entries });
 
-  const changesBefore = [];
   day.exercises.forEach((ex) => {
     const logged = state.entries[ex.id];
     if (!logged) return;
@@ -357,7 +508,9 @@ export function renderDayTrainer(container, dayId, navigate) {
   const state = { entries: {} };
   const queue = buildRenderQueue(day.exercises);
   queue.forEach((item) => {
-    container.appendChild(item.type === "single" ? singleExerciseCard(item.ex, state) : supersetCard(item.ex1, item.ex2, state));
+    if (item.type === "chainPair") container.appendChild(chainPairCard(item.ex1, item.ex2, state));
+    else if (item.type === "multiMovement") container.appendChild(multiMovementCard(item.ex, state));
+    else container.appendChild(singleExerciseCard(item.ex, state));
   });
 
   const notesCard = el(`
