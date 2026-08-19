@@ -3,7 +3,10 @@ import { renderDashboard } from "./views_dashboard.js";
 import { renderBody } from "./views_body.js";
 import { renderHistory } from "./views_history.js";
 import { renderSettings } from "./views_settings.js";
-import { getSettings } from "./store.js";
+import { getSettings, adoptPlanIfNeeded } from "./store.js";
+import { PLAN } from "./data.js";
+
+adoptPlanIfNeeded(PLAN);
 
 const app = document.getElementById("app");
 const navButtons = Array.from(document.querySelectorAll(".nav-btn"));

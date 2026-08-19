@@ -272,13 +272,13 @@ function renderSummary(container, day, navigate) {
 function renderCircuitDay(container, day, navigate) {
   container.innerHTML = "";
   container.appendChild(el(`<div class="page-title">Tag ${day.dayNumber} — ${day.title}</div>`));
-  container.appendChild(el(`<div class="page-subtitle">${day.subtitle}</div>`));
+  container.appendChild(el(`<div class="page-subtitle">${day.subtitle}${PLAN.cycleLabel ? " · " + PLAN.cycleLabel : ""}</div>`));
   container.appendChild(warmupCard(day));
 
   const ib = day.intervalBlock;
   const prevCount = getLastSessionsForDay(day.id, 99).length;
-  const useWeek3 = prevCount >= 2;
-  const cfg = useWeek3 ? ib.week3Plus : { rounds: ib.baseRounds, workSeconds: ib.workSeconds, restSeconds: ib.restSeconds };
+  const useAdvanced = prevCount >= ib.advanced.afterSessions;
+  const cfg = useAdvanced ? ib.advanced : { rounds: ib.baseRounds, workSeconds: ib.workSeconds, restSeconds: ib.restSeconds };
 
   const blockACard = el(`
     <div class="card card-accent-orange">
@@ -288,7 +288,7 @@ function renderCircuitDay(container, day, navigate) {
       </div>
       <div class="stat-row">
         <div class="stat-box"><div class="stat-label">Dauer</div><div class="stat-value orange">${ib.totalLabel}</div></div>
-        <div class="stat-box"><div class="stat-label">Runden</div><div class="stat-value">${cfg.rounds}${useWeek3 ? " (Wk3+)" : ""}</div></div>
+        <div class="stat-box"><div class="stat-label">Runden</div><div class="stat-value">${cfg.rounds}${useAdvanced ? ` (${ib.advanced.badge})` : ""}</div></div>
         <div class="stat-box"><div class="stat-label">Sprint/Locker</div><div class="stat-value">${cfg.workSeconds}/${cfg.restSeconds}s</div></div>
       </div>
       <div class="footer-note">→ ${ib.footerNote}</div>
@@ -351,7 +351,7 @@ export function renderDayTrainer(container, dayId, navigate) {
 
   container.innerHTML = "";
   container.appendChild(el(`<div class="page-title">Tag ${day.dayNumber} — ${day.title}</div>`));
-  container.appendChild(el(`<div class="page-subtitle">${day.subtitle}</div>`));
+  container.appendChild(el(`<div class="page-subtitle">${day.subtitle}${PLAN.cycleLabel ? " · " + PLAN.cycleLabel : ""}</div>`));
   container.appendChild(warmupCard(day));
 
   const state = { entries: {} };

@@ -8,6 +8,7 @@ function emptyState() {
     exerciseTargets: {}, // { [exerciseId]: { weightKg, repMinOverride, repMaxOverride, updatedAt } } — aktueller Vorschlag/Zielwert
     changeLog: [], // { id, dateISO, scope: 'exercise'|'plan', exerciseId?, dayId?, title, reason, kind: 'progression'|'deload'|'swap'|'note' }
     settings: { tvMode: false, unit: "kg" },
+    planId: null,
   };
 }
 
@@ -84,8 +85,8 @@ export function getExerciseHistory(exerciseId, count = 10) {
 }
 
 // ---- Body Metrics ----
-export function saveBodyMetric({ weightKg, waistCm, note }) {
-  const entry = { id: uid(), dateISO: new Date().toISOString(), weightKg, waistCm, note: note || "" };
+export function saveBodyMetric({ weightKg, waistCm, note, dateISO }) {
+  const entry = { id: uid(), dateISO: dateISO || new Date().toISOString(), weightKg, waistCm, note: note || "" };
   state.bodyMetrics.push(entry);
   state.bodyMetrics.sort((a, b) => new Date(a.dateISO) - new Date(b.dateISO));
   persist();
@@ -112,6 +113,53 @@ export function setExerciseTarget(exerciseId, target) {
   state.exerciseTargets[exerciseId] = { ...target, updatedAt: new Date().toISOString() };
   persist();
   notify();
+}
+
+// ---- Plan-Version ----
+// Wird beim App-Start aufgerufen. Wenn sich die Plan-ID geändert hat (neuer Zyklus), übernimmt sie die im
+// Plan hinterlegten Startgewichte als aktuelle Zielwerte, damit die Trainingsansicht sofort sinnvolle Werte
+// zeigt, auch bevor der erste Satz des neuen Zyklus geloggt wurde. Bereits vorhandene Historie bleibt erhalten.
+export function adoptPlanIfNeeded(plan) {
+  if (state.planId === plan.id) return false;
+
+  const isFirstEverLoad = state.planId === null && state.sessionLogs.length === 0 && Object.keys(state.exerciseTargets).length === 0;
+
+  plan.days.forEach((day) => {
+    day.exercises.forEach((ex) => {
+      if (ex.seedWeightKg == null) return;
+      const movement = ex.movements[0];
+      state.exerciseTargets[ex.id] = {
+        weightKg: ex.seedWeightKg,
+        repMin: movement.repMin ?? null,
+        repMax: movement.repMax ?? null,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  });
+
+  if (!isFirstEverLoad) {
+    addChangeLogEntry({
+      scope: "plan",
+      title: `Neuer Trainingsplan übernommen: ${plan.cycleLabel || plan.name}`,
+      reason: "Zielgewichte wurden mit den im Plan hinterlegten Startwerten aktualisiert.",
+      kind: "note",
+    });
+    if (plan.id === "home-gym-v2") {
+      addChangeLogEntry({
+        scope: "exercise",
+        dayId: "tag4-beine",
+        exerciseId: "beine-hip-thrust",
+        title: "Beine: Hip Thrust ersetzt KB Swing Single-Hand",
+        reason: "Wegen Belastung der Bizepssehne — Hip Thrust ist die sicherere Alternative fürs Gesäß-Training.",
+        kind: "swap",
+      });
+    }
+  }
+
+  state.planId = plan.id;
+  persist();
+  notify();
+  return true;
 }
 
 // ---- Change Log (Plan-Anpassungen mit Begründung) ----

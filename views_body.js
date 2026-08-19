@@ -20,8 +20,10 @@ export function renderBody(container, refresh) {
   const metrics = getBodyMetrics();
   container.appendChild(el(`<div class="insight-card insight-good" style="margin-bottom:16px">${nextDueText(metrics)}</div>`));
 
+  const todayStr = new Date().toISOString().slice(0, 10);
   const form = el(`
     <div class="card">
+      <div class="field" style="margin-bottom:12px"><label>Datum</label><input type="date" data-role="date" max="${todayStr}" value="${todayStr}" /></div>
       <div class="form-grid">
         <div class="field"><label>Gewicht (kg)</label><input type="number" step="0.1" inputmode="decimal" data-role="weight" placeholder="z. B. 84.5" /></div>
         <div class="field"><label>Bauchumfang (cm)</label><input type="number" step="0.5" inputmode="decimal" data-role="waist" placeholder="z. B. 92" /></div>
@@ -34,8 +36,10 @@ export function renderBody(container, refresh) {
     const weightKg = parseFloat(form.querySelector('[data-role="weight"]').value);
     const waistCm = parseFloat(form.querySelector('[data-role="waist"]').value);
     const note = form.querySelector('[data-role="note"]').value;
+    const dateStr = form.querySelector('[data-role="date"]').value || todayStr;
     if (!weightKg && !waistCm) return;
-    saveBodyMetric({ weightKg: weightKg || null, waistCm: waistCm || null, note });
+    const dateISO = new Date(`${dateStr}T12:00:00`).toISOString();
+    saveBodyMetric({ weightKg: weightKg || null, waistCm: waistCm || null, note, dateISO });
     renderBody(container, refresh);
   });
   container.appendChild(form);
