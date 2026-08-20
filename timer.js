@@ -1,6 +1,24 @@
 import { el } from "./utils.js";
 
 let audioCtx = null;
+
+// iOS/Safari lässt AudioContext nur innerhalb einer echten Nutzergeste starten. Wird bei der ersten
+// Berührung der App aufgerufen (siehe main.js), damit die Pieptöne der Timer später zuverlässig zu hören sind.
+export function unlockAudioOnFirstInteraction() {
+  const unlock = () => {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+    } catch (e) {
+      /* Web Audio nicht verfügbar — Timer funktionieren trotzdem, nur ohne Ton */
+    }
+    document.removeEventListener("pointerdown", unlock);
+    document.removeEventListener("keydown", unlock);
+  };
+  document.addEventListener("pointerdown", unlock, { once: true });
+  document.addEventListener("keydown", unlock, { once: true });
+}
+
 function beep(freq = 880, durationMs = 180) {
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
