@@ -1,4 +1,4 @@
-const CACHE_NAME = "training-app-v4";
+const CACHE_NAME = "training-app-v5";
 const ASSETS = [
   "./",
   "./index.html",
@@ -33,20 +33,20 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+// Network-first für die App selbst: Wer online ist (z. B. zu Hause), bekommt sofort den neuesten Stand
+// nach Plan-Anpassungen statt erst nach zweimaligem Neuladen. Offline (z. B. unterwegs) greift der Cache,
+// damit die App immer nutzbar bleibt.
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request)
-        .then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return response;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    fetch(event.request)
+      .then((response) => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });

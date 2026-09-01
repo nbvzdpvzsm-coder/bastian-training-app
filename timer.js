@@ -2,13 +2,33 @@ import { el } from "./utils.js";
 
 let audioCtx = null;
 
+function beep(freq = 880, durationMs = 180) {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    gain.gain.value = 0.35;
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + durationMs / 1000);
+    osc.stop(audioCtx.currentTime + durationMs / 1000);
+  } catch (e) {
+    /* Audio evtl. gesperrt bis erste Nutzerinteraktion — kein Problem, Timer läuft trotzdem */
+  }
+}
+
 // iOS/Safari lässt AudioContext nur innerhalb einer echten Nutzergeste starten. Wird bei der ersten
-// Berührung der App aufgerufen (siehe main.js), damit die Pieptöne der Timer später zuverlässig zu hören sind.
+// Berührung der App aufgerufen (siehe main.js), spielt sofort einen kurzen Bestätigungston: Wenn der
+// hier zu hören ist, funktionieren auch die Countdown-Pieptöne später — bleibt er stumm, liegt es meist
+// am lautlos geschalteten iPhone (Web-Audio wird vom Stummschalt-Regler unterdrückt, kein App-Fehler).
 export function unlockAudioOnFirstInteraction() {
   const unlock = () => {
     try {
       audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === "suspended") audioCtx.resume();
+      const resumed = audioCtx.state === "suspended" ? audioCtx.resume() : Promise.resolve();
+      Promise.resolve(resumed).then(() => beep(880, 90));
     } catch (e) {
       /* Web Audio nicht verfügbar — Timer funktionieren trotzdem, nur ohne Ton */
     }
@@ -17,23 +37,6 @@ export function unlockAudioOnFirstInteraction() {
   };
   document.addEventListener("pointerdown", unlock, { once: true });
   document.addEventListener("keydown", unlock, { once: true });
-}
-
-function beep(freq = 880, durationMs = 180) {
-  try {
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = "sine";
-    osc.frequency.value = freq;
-    gain.gain.value = 0.15;
-    osc.connect(gain).connect(audioCtx.destination);
-    osc.start();
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + durationMs / 1000);
-    osc.stop(audioCtx.currentTime + durationMs / 1000);
-  } catch (e) {
-    /* Audio evtl. gesperrt bis erste Nutzerinteraktion — kein Problem, Timer läuft trotzdem */
-  }
 }
 
 /**

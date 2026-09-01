@@ -589,7 +589,7 @@ function renderCircuitDay(container, day, navigate) {
   });
   container.appendChild(blockBCard);
   container.appendChild(circuitRepsLogCard(cb, state));
-  container.appendChild(finisherLogCard(day.finisher, state));
+  if (day.finisher) container.appendChild(finisherLogCard(day.finisher, state));
 
   const finishBtn = el(`<button class="btn btn-secondary" style="margin-top:6px">Training abschließen</button>`);
   finishBtn.addEventListener("click", () => {

@@ -18,6 +18,19 @@ function resolveCircuitLogLabel(day, exId) {
   return null;
 }
 
+// Macht aus einer Übungs-ID einen lesbaren Namen (z. B. "beine-sumo-deadlift" -> "Sumo Deadlift"),
+// falls die Übung inzwischen aus dem aktuellen Plan entfernt wurde. Alte Trainings bleiben so im
+// Verlauf sichtbar, auch wenn sich der Plan später ändert.
+function prettifyExerciseId(dayId, exId) {
+  const dayPrefix = dayId.split("-").slice(1).join("-");
+  let label = exId;
+  if (dayPrefix && label.startsWith(dayPrefix + "-")) label = label.slice(dayPrefix.length + 1);
+  return label
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 export function renderHistory(container) {
   container.innerHTML = "";
   container.appendChild(el(`<div class="page-title">Verlauf</div>`));
@@ -58,13 +71,26 @@ export function renderHistory(container) {
         body.appendChild(el(`<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px"><b style="font-size:13.5px">${ex.name}</b>${rows}</div>`));
         return;
       }
-      if (!day) return;
-      const circuitLabel = resolveCircuitLogLabel(day, exId);
-      if (!circuitLabel) return;
-      const sets = (data.movements?.[0]?.sets || []).filter(Boolean);
-      if (sets.length === 0) return;
-      const setsStr = sets.map((s, i) => circuitLabel.formatSet(s, i)).join(" · ");
-      body.appendChild(el(`<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px"><b style="font-size:13.5px">${circuitLabel.name}</b><div style="font-size:13px;color:var(--text-dim);padding:4px 0">${setsStr}</div></div>`));
+      const circuitLabel = day ? resolveCircuitLogLabel(day, exId) : null;
+      if (circuitLabel) {
+        const sets = (data.movements?.[0]?.sets || []).filter(Boolean);
+        if (sets.length === 0) return;
+        const setsStr = sets.map((s, i) => circuitLabel.formatSet(s, i)).join(" · ");
+        body.appendChild(el(`<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px"><b style="font-size:13.5px">${circuitLabel.name}</b><div style="font-size:13px;color:var(--text-dim);padding:4px 0">${setsStr}</div></div>`));
+        return;
+      }
+      // Übung existiert nicht mehr im aktuellen Plan (z. B. nach einer Plan-Anpassung) —
+      // Daten trotzdem anzeigen, statt sie kommentarlos verschwinden zu lassen.
+      const fallbackSets = (data.movements || []).flatMap((mv) => (mv.sets || []).filter(Boolean));
+      if (fallbackSets.length === 0) return;
+      const fallbackStr = fallbackSets.map((s) => (s.weight != null ? `${s.weight}kg×${s.reps}` : `${s.reps}`)).join(", ");
+      body.appendChild(el(`
+        <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px">
+          <b style="font-size:13.5px">${prettifyExerciseId(log.dayId, exId)}</b>
+          <span class="pill pill-red" style="margin-left:6px;vertical-align:middle">nicht mehr im Plan</span>
+          <div style="font-size:13px;color:var(--text-dim);padding:4px 0">${fallbackStr}</div>
+        </div>
+      `));
     });
     details.appendChild(body);
 
