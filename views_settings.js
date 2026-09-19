@@ -1,5 +1,6 @@
 import { getSettings, updateSettings, exportData, importData } from "./store.js";
 import { el } from "./utils.js";
+import { playTestBeeps } from "./timer.js";
 
 export function renderSettings(container, navigate) {
   container.innerHTML = "";
@@ -25,6 +26,29 @@ export function renderSettings(container, navigate) {
     renderSettings(container, navigate);
   });
   container.appendChild(tvRow);
+
+  const soundCard = el(`
+    <div class="card">
+      <div class="settings-row">
+        <div style="padding-right:12px">
+          <div style="font-weight:700;font-size:15px">Ton auch bei stummem iPhone</div>
+          <div style="color:var(--text-dim);font-size:12.5px;margin-top:2px">Countdown-Pieptöne trotz Klingel-Schalter. Kann laufende Musik kurz unterbrechen.</div>
+        </div>
+        <button class="switch ${settings.beepInSilentMode !== false ? "on" : ""}" data-action="toggle-silent"><span class="knob"></span></button>
+      </div>
+      <button class="btn btn-secondary" style="margin-top:12px" data-action="test-sound">Ton testen</button>
+      <div data-role="sound-status" style="color:var(--text-faint);font-size:12px;margin-top:10px;line-height:1.5"></div>
+    </div>
+  `);
+  soundCard.querySelector('[data-action="toggle-silent"]').addEventListener("click", () => {
+    updateSettings({ beepInSilentMode: getSettings().beepInSilentMode === false });
+    renderSettings(container, navigate);
+  });
+  soundCard.querySelector('[data-action="test-sound"]').addEventListener("click", () => {
+    const status = playTestBeeps();
+    soundCard.querySelector('[data-role="sound-status"]').textContent = `Es sollten 3 kurze Töne und ein längerer Ton zu hören sein. ${status}. Nichts zu hören? Lautstärke prüfen und den Klingel-Schalter (Seite des iPhones) auf laut stellen.`;
+  });
+  container.appendChild(soundCard);
 
   container.appendChild(el(`<div class="section-title">Datensicherung</div>`));
   const backupCard = el(`

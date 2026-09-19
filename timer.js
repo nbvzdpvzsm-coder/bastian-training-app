@@ -1,42 +1,71 @@
 import { el } from "./utils.js";
+import { getSettings } from "./store.js";
 
 let audioCtx = null;
+
+// Web Audio auf iOS/Safari startet nur, wenn resume()/start() SYNCHRON innerhalb einer echten Nutzergeste
+// aufgerufen wird — und dort zählen "click" und "touchend", nicht "pointerdown"/"touchstart". Die Timer-Pieptöne
+// kommen später aus setInterval (keine Geste), deshalb wird der AudioContext hier vorab entsperrt: bei jedem
+// Antippen der App (siehe main.js) und beim Start jedes Timers (der selbst aus einem Tipp heraus startet).
+export function primeAudio() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    audioCtx = audioCtx || new Ctx();
+    applyAudioSession();
+    if (audioCtx.state === "running") return;
+    audioCtx.resume();
+    // Ein stilles Sample abspielen: das schaltet den Ausgang auf iOS endgültig frei.
+    const source = audioCtx.createBufferSource();
+    source.buffer = audioCtx.createBuffer(1, 1, 22050);
+    source.connect(audioCtx.destination);
+    source.start(0);
+  } catch (e) {
+    /* Web Audio nicht verfügbar — Timer funktionieren trotzdem, nur ohne Ton */
+  }
+}
+
+// iOS schaltet Web-Audio standardmäßig stumm, wenn der Klingel-Schalter aktiv ist. Mit audioSession "playback"
+// (Safari 16.4+) wird der Ton trotzdem ausgegeben — dafür kann er laufende Musik kurz unterbrechen.
+function applyAudioSession() {
+  try {
+    if (navigator.audioSession) navigator.audioSession.type = getSettings().beepInSilentMode === false ? "auto" : "playback";
+  } catch (e) {
+    /* nicht unterstützt */
+  }
+}
+
+export function audioStatus() {
+  const session = navigator.audioSession ? navigator.audioSession.type : "nicht verfügbar";
+  return `AudioContext: ${audioCtx ? audioCtx.state : "nicht gestartet"} · audioSession: ${session}`;
+}
 
 function beep(freq = 880, durationMs = 180) {
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state !== "running") audioCtx.resume();
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.type = "sine";
     osc.frequency.value = freq;
-    gain.gain.value = 0.35;
+    gain.gain.value = 0.6;
     osc.connect(gain).connect(audioCtx.destination);
     osc.start();
     gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + durationMs / 1000);
     osc.stop(audioCtx.currentTime + durationMs / 1000);
   } catch (e) {
-    /* Audio evtl. gesperrt bis erste Nutzerinteraktion — kein Problem, Timer läuft trotzdem */
+    /* Audio nicht verfügbar — Timer läuft trotzdem */
   }
 }
 
-// iOS/Safari lässt AudioContext nur innerhalb einer echten Nutzergeste starten. Wird bei der ersten
-// Berührung der App aufgerufen (siehe main.js), spielt sofort einen kurzen Bestätigungston: Wenn der
-// hier zu hören ist, funktionieren auch die Countdown-Pieptöne später — bleibt er stumm, liegt es meist
-// am lautlos geschalteten iPhone (Web-Audio wird vom Stummschalt-Regler unterdrückt, kein App-Fehler).
-export function unlockAudioOnFirstInteraction() {
-  const unlock = () => {
-    try {
-      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-      const resumed = audioCtx.state === "suspended" ? audioCtx.resume() : Promise.resolve();
-      Promise.resolve(resumed).then(() => beep(880, 90));
-    } catch (e) {
-      /* Web Audio nicht verfügbar — Timer funktionieren trotzdem, nur ohne Ton */
-    }
-    document.removeEventListener("pointerdown", unlock);
-    document.removeEventListener("keydown", unlock);
-  };
-  document.addEventListener("pointerdown", unlock, { once: true });
-  document.addEventListener("keydown", unlock, { once: true });
+// Testton für die Einstellungen: 3 kurze Countdown-Töne + Abschlusston. Muss aus einem Tipp heraus aufgerufen werden.
+export function playTestBeeps() {
+  primeAudio();
+  beep(660, 120);
+  setTimeout(() => beep(660, 120), 700);
+  setTimeout(() => beep(660, 120), 1400);
+  setTimeout(() => beep(1046, 350), 2100);
+  return audioStatus();
 }
 
 /**
@@ -44,6 +73,7 @@ export function unlockAudioOnFirstInteraction() {
  * onDone wird aufgerufen, wenn die Zeit abläuft (Ton + Callback).
  */
 export function showRestTimer(seconds, { label = "Pause", onDone } = {}) {
+  primeAudio();
   let remaining = seconds;
   const overlay = el(`
     <div class="timer-overlay">
@@ -73,6 +103,7 @@ export function showRestTimer(seconds, { label = "Pause", onDone } = {}) {
   }, 1000);
 
   overlay.addEventListener("click", (e) => {
+    primeAudio();
     const action = e.target.closest("[data-action]")?.dataset.action;
     if (action === "skip") {
       clearInterval(intervalId);
@@ -98,6 +129,7 @@ export function showRestTimer(seconds, { label = "Pause", onDone } = {}) {
  * phases: [{ label, seconds, kind: 'work'|'rest', sub }]
  */
 export function playIntervalProgram(phases, { onAllDone } = {}) {
+  primeAudio();
   let idx = 0;
   let remaining = phases[0].seconds;
   const overlay = el(`
@@ -157,6 +189,7 @@ export function playIntervalProgram(phases, { onAllDone } = {}) {
   }, 1000);
 
   overlay.addEventListener("click", (e) => {
+    primeAudio();
     const action = e.target.closest("[data-action]")?.dataset.action;
     if (action === "pause") {
       paused = !paused;

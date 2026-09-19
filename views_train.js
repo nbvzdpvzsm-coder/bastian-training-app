@@ -1,4 +1,4 @@
-import { PLAN, getDay } from "./data.js";
+import { PLAN, getDay, dayLabel, dayShort } from "./data.js";
 import { getExerciseTarget, saveSessionLog, getLastSessionsForDay, getRecentChanges, getExerciseHistory } from "./store.js";
 import { updateTargetAfterSession } from "./progression.js";
 import { el, repLabel, loadUnitLabel, formatRelative } from "./utils.js";
@@ -7,16 +7,25 @@ import { showRestTimer, playIntervalProgram } from "./timer.js";
 export function renderDayList(container, navigate) {
   container.innerHTML = "";
   container.appendChild(el(`<div class="page-title">Training</div>`));
-  container.appendChild(el(`<div class="page-subtitle">Wähle deinen heutigen Tag</div>`));
+  container.appendChild(el(`<div class="page-subtitle">Wähle deinen heutigen Tag · ${PLAN.cycleLabel}</div>`));
+
+  if (PLAN.overview) {
+    container.appendChild(el(`
+      <div class="insight-card insight-good">
+        ${PLAN.overview.strategy}
+        <div style="margin-top:8px;opacity:0.85">${PLAN.overview.schedule.join("<br/>")}</div>
+      </div>
+    `));
+  }
 
   PLAN.days.forEach((day) => {
     const lastSessions = getLastSessionsForDay(day.id, 1);
     const lastText = lastSessions[0] ? `Zuletzt ${formatRelative(lastSessions[0].dateISO)}` : "Noch nicht trainiert";
     const item = el(`
       <button class="day-list-item" style="width:100%;text-align:left;border:1px solid var(--border);font-family:inherit" data-day="${day.id}">
-        <div class="day-num">${day.dayNumber}</div>
+        <div class="day-num">${dayShort(day)}</div>
         <div class="info">
-          <div class="name">${day.title}</div>
+          <div class="name">${dayLabel(day)} — ${day.title}</div>
           <div class="sub">${day.subtitle}</div>
           <div class="sub" style="margin-top:4px;color:var(--text-faint)">${lastText}</div>
         </div>
@@ -47,9 +56,22 @@ function effectiveRestSeconds(pauseSeconds) {
   return Math.max(0, (pauseSeconds || 60) - 15);
 }
 
+// Letzte Einheit, in der dieser Bewegung tatsächlich Sätze protokolliert wurden (leere Einträge werden übersprungen).
 function getLastMovementSets(recordId, movementIdx) {
-  const history = getExerciseHistory(recordId, 1);
-  return history[0]?.movements?.[movementIdx]?.sets || null;
+  const history = getExerciseHistory(recordId, 10);
+  const last = history.find((h) => (h.movements?.[movementIdx]?.sets || []).some(Boolean));
+  return last?.movements?.[movementIdx]?.sets || null;
+}
+
+// Nur Übungen mit mindestens einem protokollierten Satz speichern, damit leere Einträge
+// nicht die Vorbelegung aus dem letzten echten Training verdrängen.
+function pruneEntries(entries) {
+  const pruned = {};
+  Object.entries(entries).forEach(([id, data]) => {
+    const hasData = (data.movements || []).some((mv) => (mv.sets || []).some((s) => s && (s.reps != null || s.weight != null)));
+    if (hasData) pruned[id] = data;
+  });
+  return pruned;
 }
 
 function targetHint(recordId, movement) {
@@ -201,7 +223,10 @@ function renderRoundBasedCard({ parts, pauseSeconds, headerHtml, footerHtml, acc
   const table = el(`<table class="set-table"><thead><tr>
       <th></th>
       ${parts
-        .map((p) => (needsWeightInput(p.loadType) ? `<th>${p.label} kg</th><th>${p.label} Wdh.</th>` : `<th>${p.label} Wdh.</th>`))
+        .map((p) => {
+          const unit = p.movement.repType === "time" ? "Sek" : "Wdh.";
+          return needsWeightInput(p.loadType) ? `<th>${p.label} kg</th><th>${p.label} ${unit}</th>` : `<th>${p.label} ${unit}</th>`;
+        })
         .join("")}
       <th></th>
     </tr></thead><tbody></tbody></table>`);
@@ -367,21 +392,23 @@ function buildRenderQueue(exercises) {
         return;
       }
     }
-    queue.push({ type: ex.movements.length > 1 ? "multiMovement" : "single", ex });
+    if (ex.type === "interval") queue.push({ type: "interval", ex });
+    else queue.push({ type: ex.movements.length > 1 ? "multiMovement" : "single", ex });
   });
   return queue;
 }
 
 function finishSession(day, state, container, navigate) {
-  const hadAnyEntry = Object.keys(state.entries).length > 0;
-  if (!hadAnyEntry) {
+  const entries = pruneEntries(state.entries);
+  if (Object.keys(entries).length === 0) {
     navigate("train");
     return;
   }
-  saveSessionLog({ dayId: day.id, entries: state.entries });
+  saveSessionLog({ dayId: day.id, entries });
 
   day.exercises.forEach((ex) => {
-    const logged = state.entries[ex.id];
+    if (ex.type === "interval") return;
+    const logged = entries[ex.id];
     if (!logged) return;
     updateTargetAfterSession(ex, day.id, logged.movements);
   });
@@ -392,7 +419,7 @@ function finishSession(day, state, container, navigate) {
 function renderSummary(container, day, navigate) {
   container.innerHTML = "";
   container.appendChild(el(`<div class="page-title">Training gespeichert ✓</div>`));
-  container.appendChild(el(`<div class="page-subtitle">${day.title} — gute Arbeit.</div>`));
+  container.appendChild(el(`<div class="page-subtitle">${dayLabel(day)} — gute Arbeit.</div>`));
 
   const changes = getRecentChanges(6).filter((c) => c.dayId === day.id && Date.now() - new Date(c.dateISO).getTime() < 60000);
 
@@ -420,193 +447,78 @@ function renderSummary(container, day, navigate) {
   container.appendChild(btn);
 }
 
-// Ergebnis-Eintrag für Block A (Airbike Intervalle): geschaffte Runden + Gesamtkalorien,
-// damit sich das Ergebnis wochenweise vergleichen lässt. Nutzt dieselbe {reps, weight}-Struktur
-// wie die Kraft-Übungen (reps=Runden, weight=Kalorien), um Verlauf/Vorbelegung wiederzuverwenden.
-function intervalResultCard(ib, cfg, state) {
-  const card = el(`<div class="card"></div>`);
-  card.appendChild(el(`<div class="ex-name" style="margin-bottom:2px">Ergebnis eintragen</div>`));
-  card.appendChild(el(`<div class="ex-cue" style="margin-bottom:10px">Für den Vergleich zur nächsten Woche</div>`));
+// Intervall-Block (Airbike): Karte mit Timer + Ergebnis-Eintrag (geschaffte Runden, Gesamtkalorien) für den
+// Wochenvergleich. Nutzt dieselbe {reps, weight}-Struktur wie Kraft-Übungen (reps=Runden, weight=Kalorien),
+// damit Verlauf und Vorbelegung wiederverwendet werden. Gespeichert wird nur, was aktiv eingetippt wurde.
+function intervalBlockCards(ib, state) {
+  const accent = ib.badgeColor || "orange";
+  const timerCard = el(`
+    <div class="card card-accent-${accent}">
+      <div class="ex-header">
+        <div class="badge badge-${accent}">${ib.badge}</div>
+        <div><div class="ex-name">${ib.label}</div><div class="ex-cue">${ib.cue}</div></div>
+      </div>
+      <div class="stat-row">
+        <div class="stat-box"><div class="stat-label">Dauer</div><div class="stat-value orange">${ib.totalLabel}</div></div>
+        <div class="stat-box"><div class="stat-label">Runden</div><div class="stat-value">${ib.baseRounds}</div></div>
+        <div class="stat-box"><div class="stat-label">Sprint/Locker</div><div class="stat-value">${ib.workSeconds}/${ib.restSeconds}s</div></div>
+      </div>
+      <div class="footer-note">→ ${ib.footerNote}</div>
+      <button class="btn btn-primary" style="margin-top:12px" data-action="start">Intervall-Timer starten</button>
+    </div>
+  `);
+  timerCard.querySelector('[data-action="start"]').addEventListener("click", () => {
+    const phases = [];
+    for (let r = 1; r <= ib.baseRounds; r++) {
+      phases.push({ label: `Sprint · Runde ${r}/${ib.baseRounds}`, seconds: ib.workSeconds, kind: "work" });
+      phases.push({ label: `Locker · Runde ${r}/${ib.baseRounds}`, seconds: ib.restSeconds, kind: "rest" });
+    }
+    playIntervalProgram(phases, { onAllDone: () => {} });
+  });
+
+  const resultCard = el(`<div class="card"></div>`);
+  resultCard.appendChild(el(`<div class="ex-name" style="margin-bottom:2px">${ib.label}: Ergebnis eintragen</div>`));
+  resultCard.appendChild(el(`<div class="ex-cue" style="margin-bottom:10px">Für den Vergleich zur nächsten Woche</div>`));
 
   const lastSets = getLastMovementSets(ib.id, 0);
-  const lastRounds = lastSets?.[0]?.reps;
-  const lastKcal = lastSets?.[0]?.weight;
-
   const row = el(`
     <div class="form-grid" style="margin-bottom:0">
-      <div class="field"><label>Geschaffte Runden</label><input type="number" inputmode="numeric" data-role="rounds" placeholder="${cfg.rounds}" /></div>
+      <div class="field"><label>Geschaffte Runden</label><input type="number" inputmode="numeric" data-role="rounds" placeholder="${ib.baseRounds}" /></div>
       <div class="field"><label>Kalorien gesamt</label><input type="number" inputmode="numeric" data-role="kcal" placeholder="z. B. 140" /></div>
     </div>
   `);
   const roundsInput = row.querySelector('[data-role="rounds"]');
   const kcalInput = row.querySelector('[data-role="kcal"]');
-  if (lastRounds != null) roundsInput.value = lastRounds;
-  if (lastKcal != null) kcalInput.value = lastKcal;
+  if (lastSets?.[0]?.reps != null) roundsInput.value = lastSets[0].reps;
+  if (lastSets?.[0]?.weight != null) kcalInput.value = lastSets[0].weight;
 
-  state.entries[ib.id] = state.entries[ib.id] || { movements: [{ sets: [] }] };
   const sync = () => {
-    state.entries[ib.id].movements[0].sets[0] = {
-      reps: roundsInput.value ? Number(roundsInput.value) : null,
-      weight: kcalInput.value ? Number(kcalInput.value) : null,
+    state.entries[ib.id] = {
+      movements: [
+        {
+          sets: [
+            {
+              reps: roundsInput.value ? Number(roundsInput.value) : null,
+              weight: kcalInput.value ? Number(kcalInput.value) : null,
+            },
+          ],
+        },
+      ],
     };
   };
   roundsInput.addEventListener("input", sync);
   kcalInput.addEventListener("input", sync);
-  if (lastRounds != null || lastKcal != null) sync();
+  resultCard.appendChild(row);
 
-  card.appendChild(row);
-  return card;
-}
-
-// Wiederholungs-Log für den Circuit: pro Übung (Zeile) und Runde (Spalte) die geschafften Wdh.
-// eintragen, um Runde-zu-Runde und Woche-zu-Woche vergleichen zu können.
-function circuitRepsLogCard(cb, state) {
-  const card = el(`<div class="card"></div>`);
-  card.appendChild(el(`<div class="ex-name" style="margin-bottom:2px">Wiederholungen pro Runde</div>`));
-  card.appendChild(el(`<div class="ex-cue" style="margin-bottom:10px">Geschaffte Wdh. je 45-Sek-Runde eintragen</div>`));
-
-  const table = el(`<table class="set-table"><thead><tr>
-      <th></th>
-      ${Array.from({ length: cb.rounds }, (_, i) => `<th>Runde ${i + 1}</th>`).join("")}
-    </tr></thead><tbody></tbody></table>`);
-  const tbody = table.querySelector("tbody");
-
-  cb.exercises.forEach((ex) => {
-    state.entries[ex.id] = state.entries[ex.id] || { movements: [{ sets: [] }] };
-    const lastSets = getLastMovementSets(ex.id, 0);
-    const row = el(`<tr class="set-row"><td class="set-idx" style="text-align:left;width:auto;white-space:nowrap"><b>${ex.badge}</b> <span style="color:var(--text-faint);font-size:11px">${ex.name}</span></td></tr>`);
-    for (let r = 0; r < cb.rounds; r++) {
-      const td = document.createElement("td");
-      const input = document.createElement("input");
-      input.className = "num-input";
-      input.type = "number";
-      input.inputMode = "numeric";
-      const lastVal = lastSets?.[r]?.reps;
-      if (lastVal != null) input.value = lastVal;
-      input.addEventListener("input", () => {
-        state.entries[ex.id].movements[0].sets[r] = { reps: input.value ? Number(input.value) : null, weight: null };
-      });
-      td.appendChild(input);
-      row.appendChild(td);
-    }
-    tbody.appendChild(row);
-  });
-  card.appendChild(table);
-  return card;
-}
-
-// Zeit je 250-m-Intervall beim Ruder-Finisher, um das Tempo wochenweise zu vergleichen.
-function finisherLogCard(finisher, state) {
-  const card = el(`<div class="card"></div>`);
-  card.appendChild(el(`<div class="ex-name">${finisher.label}</div>`));
-  card.appendChild(el(`<div class="footer-note" style="margin-top:2px;margin-bottom:10px">${finisher.detail}</div>`));
-
-  state.entries[finisher.id] = state.entries[finisher.id] || { movements: [{ sets: [] }] };
-  const lastSets = getLastMovementSets(finisher.id, 0);
-
-  const table = el(`<table class="set-table"><thead><tr>
-      <th></th>
-      ${Array.from({ length: finisher.reps }, (_, i) => `<th>${i + 1}. ${finisher.distanceLabel}</th>`).join("")}
-    </tr></thead><tbody><tr class="set-row"><td class="set-idx">Sek</td></tr></tbody></table>`);
-  const row = table.querySelector("tr.set-row");
-  for (let i = 0; i < finisher.reps; i++) {
-    const td = document.createElement("td");
-    const input = document.createElement("input");
-    input.className = "num-input";
-    input.type = "number";
-    input.inputMode = "numeric";
-    input.placeholder = finisher.targetSeconds;
-    const lastVal = lastSets?.[i]?.reps;
-    if (lastVal != null) input.value = lastVal;
-    input.addEventListener("input", () => {
-      state.entries[finisher.id].movements[0].sets[i] = { reps: input.value ? Number(input.value) : null, weight: null };
-    });
-    td.appendChild(input);
-    row.appendChild(td);
-  }
-  card.appendChild(table);
-  return card;
-}
-
-function renderCircuitDay(container, day, navigate) {
-  container.innerHTML = "";
-  container.appendChild(el(`<div class="page-title">Tag ${day.dayNumber} — ${day.title}</div>`));
-  container.appendChild(el(`<div class="page-subtitle">${day.subtitle}${PLAN.cycleLabel ? " · " + PLAN.cycleLabel : ""}</div>`));
-  container.appendChild(warmupCard(day));
-
-  const state = { entries: {} };
-  const ib = day.intervalBlock;
-  const prevCount = getLastSessionsForDay(day.id, 99).length;
-  const useAdvanced = prevCount >= ib.advanced.afterSessions;
-  const cfg = useAdvanced ? ib.advanced : { rounds: ib.baseRounds, workSeconds: ib.workSeconds, restSeconds: ib.restSeconds };
-
-  const blockACard = el(`
-    <div class="card card-accent-orange">
-      <div class="ex-header">
-        <div class="badge badge-orange">A</div>
-        <div><div class="ex-name">${ib.label}</div><div class="ex-cue">${ib.cue}</div></div>
-      </div>
-      <div class="stat-row">
-        <div class="stat-box"><div class="stat-label">Dauer</div><div class="stat-value orange">${ib.totalLabel}</div></div>
-        <div class="stat-box"><div class="stat-label">Runden</div><div class="stat-value">${cfg.rounds}${useAdvanced ? ` (${ib.advanced.badge})` : ""}</div></div>
-        <div class="stat-box"><div class="stat-label">Sprint/Locker</div><div class="stat-value">${cfg.workSeconds}/${cfg.restSeconds}s</div></div>
-      </div>
-      <div class="footer-note">→ ${ib.footerNote}</div>
-      <button class="btn btn-primary" style="margin-top:12px" data-action="start-a">Intervall-Timer starten</button>
-    </div>
-  `);
-  blockACard.querySelector('[data-action="start-a"]').addEventListener("click", () => {
-    const phases = [];
-    for (let r = 1; r <= cfg.rounds; r++) {
-      phases.push({ label: `Sprint · Runde ${r}/${cfg.rounds}`, seconds: cfg.workSeconds, kind: "work" });
-      phases.push({ label: `Locker · Runde ${r}/${cfg.rounds}`, seconds: cfg.restSeconds, kind: "rest" });
-    }
-    playIntervalProgram(phases, { onAllDone: () => {} });
-  });
-  container.appendChild(blockACard);
-  container.appendChild(intervalResultCard(ib, cfg, state));
-
-  const cb = day.circuitBlock;
-  const blockBCard = el(`
-    <div class="card card-accent-purple">
-      <div class="ex-header">
-        <div class="badge badge-purple">B</div>
-        <div><div class="ex-name">Circuit · ${cb.rounds} Runden</div><div class="ex-cue">Ohne Pause durch B1–B5, danach ${cb.roundRestSeconds}s Pause</div></div>
-      </div>
-      <div class="circuit-exlist">
-        ${cb.exercises.map((e) => `<div class="row"><div class="badge badge-${e.badgeColor}" style="width:28px;height:28px;font-size:11px">${e.badge}</div><div><b>${e.name}</b> <span style="color:var(--text-faint)">— ${e.loadLabel}</span><div style="color:var(--text-dim);font-size:12px">${e.cue}</div></div></div>`).join("")}
-      </div>
-      <button class="btn btn-primary" style="margin-top:12px" data-action="start-b">Circuit-Timer starten</button>
-    </div>
-  `);
-  blockBCard.querySelector('[data-action="start-b"]').addEventListener("click", () => {
-    const phases = [];
-    for (let r = 1; r <= cb.rounds; r++) {
-      cb.exercises.forEach((e) => phases.push({ label: `${e.badge} · ${e.name} (Runde ${r}/${cb.rounds})`, seconds: e.workSeconds, kind: "work" }));
-      if (r < cb.rounds) phases.push({ label: `Pause vor Runde ${r + 1}`, seconds: cb.roundRestSeconds, kind: "rest" });
-    }
-    playIntervalProgram(phases, { onAllDone: () => {} });
-  });
-  container.appendChild(blockBCard);
-  container.appendChild(circuitRepsLogCard(cb, state));
-  if (day.finisher) container.appendChild(finisherLogCard(day.finisher, state));
-
-  const finishBtn = el(`<button class="btn btn-secondary" style="margin-top:6px">Training abschließen</button>`);
-  finishBtn.addEventListener("click", () => {
-    saveSessionLog({ dayId: day.id, entries: state.entries });
-    navigate("dashboard");
-  });
-  container.appendChild(finishBtn);
+  return [timerCard, resultCard];
 }
 
 export function renderDayTrainer(container, dayId, navigate) {
   const day = getDay(dayId);
   if (!day) return renderDayList(container, navigate);
 
-  if (day.isCircuitDay) return renderCircuitDay(container, day, navigate);
-
   container.innerHTML = "";
-  container.appendChild(el(`<div class="page-title">Tag ${day.dayNumber} — ${day.title}</div>`));
+  container.appendChild(el(`<div class="page-title">${dayLabel(day)} — ${day.title}</div>`));
   container.appendChild(el(`<div class="page-subtitle">${day.subtitle}${PLAN.cycleLabel ? " · " + PLAN.cycleLabel : ""}</div>`));
   container.appendChild(warmupCard(day));
 
@@ -615,12 +527,13 @@ export function renderDayTrainer(container, dayId, navigate) {
   queue.forEach((item) => {
     if (item.type === "chainPair") container.appendChild(chainPairCard(item.ex1, item.ex2, state));
     else if (item.type === "multiMovement") container.appendChild(multiMovementCard(item.ex, state));
+    else if (item.type === "interval") intervalBlockCards(item.ex, state).forEach((card) => container.appendChild(card));
     else container.appendChild(singleExerciseCard(item.ex, state));
   });
 
   const notesCard = el(`
     <div class="target-panel">
-      <div class="target-title">PROGRESSIONS-ZIEL</div>
+      <div class="target-title">${day.notesTitle || "PROGRESSIONS-ZIEL"}</div>
       ${day.progressionNotes.map((n) => `<p style="font-size:13px;color:#cfe8d6;margin-bottom:8px">${n}</p>`).join("")}
     </div>
   `);

@@ -7,7 +7,7 @@ function emptyState() {
     bodyMetrics: [], // { id, dateISO, weightKg, waistCm, note }
     exerciseTargets: {}, // { [exerciseId]: { weightKg, repMinOverride, repMaxOverride, updatedAt } } — aktueller Vorschlag/Zielwert
     changeLog: [], // { id, dateISO, scope: 'exercise'|'plan', exerciseId?, dayId?, title, reason, kind: 'progression'|'deload'|'swap'|'note' }
-    settings: { tvMode: false, unit: "kg" },
+    settings: { tvMode: false, unit: "kg", beepInSilentMode: true },
     planId: null,
   };
 }
@@ -144,16 +144,7 @@ export function adoptPlanIfNeeded(plan) {
       reason: "Zielgewichte wurden mit den im Plan hinterlegten Startwerten aktualisiert.",
       kind: "note",
     });
-    if (plan.id === "home-gym-v2") {
-      addChangeLogEntry({
-        scope: "exercise",
-        dayId: "tag4-beine",
-        exerciseId: "beine-hip-thrust",
-        title: "Beine: Hip Thrust ersetzt KB Swing Single-Hand",
-        reason: "Wegen Belastung der Bizepssehne — Hip Thrust ist die sicherere Alternative fürs Gesäß-Training.",
-        kind: "swap",
-      });
-    }
+    (plan.changeNotes || []).forEach((note) => addChangeLogEntry(note));
   }
 
   state.planId = plan.id;

@@ -1,34 +1,66 @@
 import { getState } from "./store.js";
-import { getDay, getExercise } from "./data.js";
-import { el, formatDate, repLabel } from "./utils.js";
+import { getDay, getExercise, findExerciseById, dayLabel } from "./data.js";
+import { el, formatDate } from "./utils.js";
 
-// Für Circuit-Tage (Metabolic) gibt es keine "echten" Übungen in day.exercises, sondern
-// Intervall-Ergebnis, Circuit-Wdh.-Log und Finisher-Zeiten. Löst deren IDs für die Verlaufsanzeige auf.
-function resolveCircuitLogLabel(day, exId) {
-  if (day.intervalBlock?.id === exId) {
-    return { name: day.intervalBlock.label, formatSet: (s) => `${s.reps ?? "–"} Runden · ${s.weight ?? "–"} kcal` };
-  }
-  const circuitEx = day.circuitBlock?.exercises.find((e) => e.id === exId);
-  if (circuitEx) {
-    return { name: `${circuitEx.badge} ${circuitEx.name}`, formatSet: (s, i) => `Runde ${i + 1}: ${s.reps ?? "–"} Wdh.` };
-  }
-  if (day.finisher?.id === exId) {
-    return { name: day.finisher.label, formatSet: (s, i) => `${i + 1}. ${day.finisher.distanceLabel}: ${s.reps ?? "–"} Sek` };
-  }
-  return null;
-}
-
-// Macht aus einer Übungs-ID einen lesbaren Namen (z. B. "beine-sumo-deadlift" -> "Sumo Deadlift"),
-// falls die Übung inzwischen aus dem aktuellen Plan entfernt wurde. Alte Trainings bleiben so im
-// Verlauf sichtbar, auch wenn sich der Plan später ändert.
-function prettifyExerciseId(dayId, exId) {
-  const dayPrefix = dayId.split("-").slice(1).join("-");
-  let label = exId;
+// Macht aus einer ID einen lesbaren Namen (z. B. "beine-sumo-deadlift" -> "Sumo Deadlift"), falls die Übung
+// oder der Tag inzwischen aus dem aktuellen Plan entfernt wurde. Alte Trainings bleiben so im Verlauf sichtbar,
+// auch wenn sich der Plan später ändert.
+function prettifyId(id, dayId) {
+  let label = id;
+  const dayPrefix = dayId ? dayId.split("-").slice(1).join("-") : "";
   if (dayPrefix && label.startsWith(dayPrefix + "-")) label = label.slice(dayPrefix.length + 1);
   return label
     .split("-")
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
+}
+
+function formatSets(sets) {
+  return sets.map((s) => (s.weight != null ? `${s.weight}kg×${s.reps}` : `${s.reps}`)).join(", ");
+}
+
+// Baut die Detailzeile(n) zu einem geloggten Eintrag. Liefert null, wenn nichts anzuzeigen ist.
+function entryBlock(log, exId, data) {
+  const day = getDay(log.dayId);
+  const local = day ? getExercise(log.dayId, exId) : null;
+  const found = local ? { ex: local } : findExerciseById(exId);
+  const ex = found?.ex;
+
+  let name;
+  let rows;
+  let orphan = false;
+
+  if (ex?.type === "interval") {
+    const s = (data.movements?.[0]?.sets || []).filter(Boolean)[0];
+    if (!s) return null;
+    name = ex.label;
+    rows = [`${s.reps ?? "–"} Runden · ${s.weight ?? "–"} kcal`];
+  } else if (ex) {
+    name = ex.name;
+    rows = (data.movements || [])
+      .map((mv, i) => {
+        const sets = (mv.sets || []).filter(Boolean);
+        if (sets.length === 0) return null;
+        const mvName = ex.movements?.[i]?.name ? `${ex.movements[i].name}: ` : "";
+        return `${mvName}${formatSets(sets)}`;
+      })
+      .filter(Boolean);
+  } else {
+    const sets = (data.movements || []).flatMap((mv) => (mv.sets || []).filter(Boolean));
+    if (sets.length === 0) return null;
+    name = prettifyId(exId, log.dayId);
+    rows = [formatSets(sets)];
+    orphan = true;
+  }
+  if (!rows || rows.length === 0) return null;
+
+  return el(`
+    <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px">
+      <b style="font-size:13.5px">${name}</b>
+      ${orphan ? `<span class="pill pill-red" style="margin-left:6px;vertical-align:middle">nicht mehr im Plan</span>` : ""}
+      ${rows.map((r) => `<div style="font-size:13px;color:var(--text-dim);padding:4px 0">${r}</div>`).join("")}
+    </div>
+  `);
 }
 
 export function renderHistory(container) {
@@ -44,11 +76,12 @@ export function renderHistory(container) {
 
   logs.forEach((log) => {
     const day = getDay(log.dayId);
+    const title = day ? `${dayLabel(day)} — ${day.title}` : prettifyId(log.dayId.replace(/^tag\d+-/, ""));
     const details = el(`<div class="card" style="cursor:pointer"></div>`);
     details.appendChild(el(`
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div class="ex-name">${day ? day.title : log.dayId}</div>
+          <div class="ex-name">${title}</div>
           <div class="ex-cue">${formatDate(log.dateISO)}</div>
         </div>
         <span class="pill pill-orange">${Object.keys(log.entries || {}).length} Übungen</span>
@@ -57,40 +90,8 @@ export function renderHistory(container) {
 
     const body = el(`<div style="display:none;margin-top:12px"></div>`);
     Object.entries(log.entries || {}).forEach(([exId, data]) => {
-      const ex = getExercise(log.dayId, exId);
-      if (ex) {
-        const rows = data.movements
-          .map((mv, i) => {
-            const sets = (mv.sets || []).filter(Boolean);
-            if (sets.length === 0) return "";
-            const setsStr = sets.map((s) => (s.weight != null ? `${s.weight}kg×${s.reps}` : `${s.reps}`)).join(", ");
-            const mvName = ex.movements[i]?.name ? `${ex.movements[i].name}: ` : "";
-            return `<div style="font-size:13px;color:var(--text-dim);padding:4px 0">${mvName}${setsStr}</div>`;
-          })
-          .join("");
-        body.appendChild(el(`<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px"><b style="font-size:13.5px">${ex.name}</b>${rows}</div>`));
-        return;
-      }
-      const circuitLabel = day ? resolveCircuitLogLabel(day, exId) : null;
-      if (circuitLabel) {
-        const sets = (data.movements?.[0]?.sets || []).filter(Boolean);
-        if (sets.length === 0) return;
-        const setsStr = sets.map((s, i) => circuitLabel.formatSet(s, i)).join(" · ");
-        body.appendChild(el(`<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px"><b style="font-size:13.5px">${circuitLabel.name}</b><div style="font-size:13px;color:var(--text-dim);padding:4px 0">${setsStr}</div></div>`));
-        return;
-      }
-      // Übung existiert nicht mehr im aktuellen Plan (z. B. nach einer Plan-Anpassung) —
-      // Daten trotzdem anzeigen, statt sie kommentarlos verschwinden zu lassen.
-      const fallbackSets = (data.movements || []).flatMap((mv) => (mv.sets || []).filter(Boolean));
-      if (fallbackSets.length === 0) return;
-      const fallbackStr = fallbackSets.map((s) => (s.weight != null ? `${s.weight}kg×${s.reps}` : `${s.reps}`)).join(", ");
-      body.appendChild(el(`
-        <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:8px">
-          <b style="font-size:13.5px">${prettifyExerciseId(log.dayId, exId)}</b>
-          <span class="pill pill-red" style="margin-left:6px;vertical-align:middle">nicht mehr im Plan</span>
-          <div style="font-size:13px;color:var(--text-dim);padding:4px 0">${fallbackStr}</div>
-        </div>
-      `));
+      const block = entryBlock(log, exId, data);
+      if (block) body.appendChild(block);
     });
     details.appendChild(body);
 

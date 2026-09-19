@@ -5,10 +5,12 @@ import { renderHistory } from "./views_history.js";
 import { renderSettings } from "./views_settings.js";
 import { getSettings, adoptPlanIfNeeded } from "./store.js";
 import { PLAN } from "./data.js";
-import { unlockAudioOnFirstInteraction } from "./timer.js";
+import { primeAudio } from "./timer.js";
 
 adoptPlanIfNeeded(PLAN);
-unlockAudioOnFirstInteraction();
+// iOS entsperrt Audio nur bei click/touchend (nicht bei pointerdown) — daher bei jedem Antippen nachziehen.
+document.addEventListener("click", primeAudio, true);
+document.addEventListener("touchend", primeAudio, { capture: true, passive: true });
 
 const app = document.getElementById("app");
 const navButtons = Array.from(document.querySelectorAll(".nav-btn"));

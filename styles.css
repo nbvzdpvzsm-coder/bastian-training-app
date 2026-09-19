@@ -161,6 +161,7 @@ h1, h2, h3, p { margin: 0; }
   border-radius: var(--radius);
   padding: 16px;
   margin-bottom: 12px;
+  color: var(--text);
 }
 .day-num {
   width: 46px; height: 46px; border-radius: 12px;

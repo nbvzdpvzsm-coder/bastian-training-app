@@ -23,6 +23,7 @@ export function repLabel(movement) {
   if (movement.repType === "perSide") return `${movement.repFixed}/Seite`;
   if (movement.repType === "fixed") return movement.repFixedLabel || `${movement.repFixed} Wdh.`;
   if (movement.repType === "special21") return "21 Wdh.";
+  if (movement.repType === "time") return `${movement.repFixed} Sek`;
   return "";
 }
 

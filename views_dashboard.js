@@ -1,4 +1,4 @@
-import { PLAN } from "./data.js";
+import { PLAN, dayLabel } from "./data.js";
 import { getState, getExerciseTarget, getExerciseHistory, getRecentChanges, getBodyMetrics } from "./store.js";
 import { bodyCompositionInsight, detectStagnation } from "./progression.js";
 import { el, formatRelative, formatDateShort } from "./utils.js";
@@ -38,7 +38,7 @@ export function renderDashboard(container, navigate) {
   const hero = el(`
     <div class="hero-card">
       <div class="label">Nächstes Training</div>
-      <div class="title">Tag ${nd.dayNumber} — ${nd.title}</div>
+      <div class="title">${dayLabel(nd)} — ${nd.title}</div>
       <div class="sub">${nd.subtitle}</div>
       <button class="btn btn-primary" style="margin-top:14px" data-action="start">Jetzt starten</button>
     </div>
