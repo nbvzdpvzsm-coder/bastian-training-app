@@ -1,5 +1,5 @@
 import { getState } from "./store.js";
-import { getDay, getExercise, findExerciseById, dayLabel } from "./data.js";
+import { getDay, findExerciseById, dayLabel } from "./data.js";
 import { el, formatDate } from "./utils.js";
 
 // Macht aus einer ID einen lesbaren Namen (z. B. "beine-sumo-deadlift" -> "Sumo Deadlift"), falls die Übung
@@ -21,20 +21,27 @@ function formatSets(sets) {
 
 // Baut die Detailzeile(n) zu einem geloggten Eintrag. Liefert null, wenn nichts anzuzeigen ist.
 function entryBlock(log, exId, data) {
-  const day = getDay(log.dayId);
-  const local = day ? getExercise(log.dayId, exId) : null;
-  const found = local ? { ex: local } : findExerciseById(exId);
+  const found = findExerciseById(exId, log.dayId);
   const ex = found?.ex;
+  const allSets = (data.movements?.[0]?.sets || []).filter(Boolean);
 
   let name;
   let rows;
   let orphan = false;
 
-  if (ex?.type === "interval") {
-    const s = (data.movements?.[0]?.sets || []).filter(Boolean)[0];
+  if (found?.kind === "interval") {
+    const s = allSets[0];
     if (!s) return null;
     name = ex.label;
-    rows = [`${s.reps ?? "–"} Runden · ${s.weight ?? "–"} kcal`];
+    rows = [`${s.reps ?? "–"} Runden · ${s.weight ?? "–"} kcal${s.watts != null ? ` · Peak ${s.watts} W` : ""}`];
+  } else if (found?.kind === "circuitEx") {
+    if (allSets.length === 0) return null;
+    name = `${ex.badge} ${ex.name}`;
+    rows = [allSets.map((s, i) => `Runde ${i + 1}: ${s.reps ?? "–"} Wdh.`).join(" · ")];
+  } else if (found?.kind === "finisher") {
+    if (allSets.length === 0) return null;
+    name = ex.label;
+    rows = [allSets.map((s, i) => `${i + 1}. ${ex.distanceLabel}: ${s.reps ?? "–"} Sek`).join(" · ")];
   } else if (ex) {
     name = ex.name;
     rows = (data.movements || [])

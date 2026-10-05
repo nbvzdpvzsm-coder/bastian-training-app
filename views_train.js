@@ -13,7 +13,7 @@ export function renderDayList(container, navigate) {
     container.appendChild(el(`
       <div class="insight-card insight-good">
         ${PLAN.overview.strategy}
-        <div style="margin-top:8px;opacity:0.85">${PLAN.overview.schedule.join("<br/>")}</div>
+        ${PLAN.overview.schedule ? `<div style="margin-top:8px;opacity:0.85">${PLAN.overview.schedule.join("<br/>")}</div>` : ""}
       </div>
     `));
   }
@@ -47,7 +47,7 @@ function warmupCard(day) {
 }
 
 function needsWeightInput(loadType) {
-  return ["barbell", "dumbbell", "kettlebell", "bodyweight_loaded"].includes(loadType);
+  return ["barbell", "dumbbell", "kettlebell", "cable", "bodyweight_loaded"].includes(loadType);
 }
 
 // Nach Satzabschluss vergehen realistisch ~15 Sek für Ausführung + Eintragen, bevor die eigentliche
@@ -68,7 +68,7 @@ function getLastMovementSets(recordId, movementIdx) {
 function pruneEntries(entries) {
   const pruned = {};
   Object.entries(entries).forEach(([id, data]) => {
-    const hasData = (data.movements || []).some((mv) => (mv.sets || []).some((s) => s && (s.reps != null || s.weight != null)));
+    const hasData = (data.movements || []).some((mv) => (mv.sets || []).some((s) => s && (s.reps != null || s.weight != null || s.watts != null)));
     if (hasData) pruned[id] = data;
   });
   return pruned;
@@ -216,20 +216,21 @@ function renderRoundBasedCard({ parts, pauseSeconds, headerHtml, footerHtml, acc
     state.entries[p.recordId] = state.entries[p.recordId] || { movements: Array.from({ length: p.totalMovements }, () => ({ sets: [] })) };
   });
 
-  const hints = parts.map((p) => `${p.label}: ${targetHint(p.recordId, p.movement)}`).join("  ·  ");
+  const hints = parts
+    .map((p) => {
+      const base = p.movementIdx === 0 ? getExerciseTarget(p.recordId)?.weightKg ?? p.seedWeightKg : p.seedWeightKg;
+      const w = needsWeightInput(p.loadType) && base != null ? `Ziel: ${base} kg · ` : "";
+      return `${p.label}: ${w}${repLabel(p.movement)}`;
+    })
+    .join("  ·  ");
   card.appendChild(el(`<div style="font-size:12px;color:var(--text-faint);margin-bottom:4px">${hints}</div>`));
 
   const rounds = Math.max(...parts.map((p) => p.movement.sets));
-  const table = el(`<table class="set-table"><thead><tr>
-      <th></th>
-      ${parts
-        .map((p) => {
-          const unit = p.movement.repType === "time" ? "Sek" : "Wdh.";
-          return needsWeightInput(p.loadType) ? `<th>${p.label} kg</th><th>${p.label} ${unit}</th>` : `<th>${p.label} ${unit}</th>`;
-        })
-        .join("")}
-      <th></th>
-    </tr></thead><tbody></tbody></table>`);
+  const unitOf = (p) => (p.movement.repType === "time" ? "Sek" : "Wdh.");
+  const table = el(`<table class="set-table${parts.length >= 3 ? " dense" : ""}"><thead>
+      <tr><th></th>${parts.map((p) => `<th colspan="${needsWeightInput(p.loadType) ? 2 : 1}">${p.label}</th>`).join("")}<th></th></tr>
+      <tr><th></th>${parts.map((p) => (needsWeightInput(p.loadType) ? `<th>kg</th><th>${unitOf(p)}</th>` : `<th>${unitOf(p)}</th>`)).join("")}<th></th></tr>
+    </thead><tbody></tbody></table>`);
   const tbody = table.querySelector("tbody");
 
   const partsState = parts.map((p) => ({ pristine: new Set(), rows: [], lastSets: getLastMovementSets(p.recordId, p.movementIdx), target: getExerciseTarget(p.recordId) }));
@@ -253,8 +254,9 @@ function renderRoundBasedCard({ parts, pauseSeconds, headerHtml, footerHtml, acc
         weightInput.step = "0.5";
         weightInput.inputMode = "decimal";
         if (!active) weightInput.disabled = true;
-        weightInput.placeholder = ps.target?.weightKg ?? "–";
-        const prefWeight = lastSet?.weight ?? ps.target?.weightKg ?? null;
+        const baseWeight = p.movementIdx === 0 ? ps.target?.weightKg ?? p.seedWeightKg ?? null : p.seedWeightKg ?? null;
+        weightInput.placeholder = baseWeight ?? "–";
+        const prefWeight = lastSet?.weight ?? baseWeight;
         if (prefWeight != null) weightInput.value = prefWeight;
         td.appendChild(weightInput);
         cellsBeforeCheck.push(td);
@@ -356,6 +358,7 @@ function multiMovementCard(exercise, state) {
     movement: m,
     loadType: m.loadType || exercise.loadType,
     label: m.name || `Teil ${idx + 1}`,
+    seedWeightKg: m.seedWeightKg,
     totalMovements: exercise.movements.length,
   }));
   const headerHtml = `
@@ -392,7 +395,7 @@ function buildRenderQueue(exercises) {
         return;
       }
     }
-    if (ex.type === "interval") queue.push({ type: "interval", ex });
+    if (ex.type) queue.push({ type: ex.type, ex });
     else queue.push({ type: ex.movements.length > 1 ? "multiMovement" : "single", ex });
   });
   return queue;
@@ -407,7 +410,7 @@ function finishSession(day, state, container, navigate) {
   saveSessionLog({ dayId: day.id, entries });
 
   day.exercises.forEach((ex) => {
-    if (ex.type === "interval") return;
+    if (ex.type) return;
     const logged = entries[ex.id];
     if (!logged) return;
     updateTargetAfterSession(ex, day.id, logged.movements);
@@ -447,11 +450,15 @@ function renderSummary(container, day, navigate) {
   container.appendChild(btn);
 }
 
-// Intervall-Block (Airbike): Karte mit Timer + Ergebnis-Eintrag (geschaffte Runden, Gesamtkalorien) für den
-// Wochenvergleich. Nutzt dieselbe {reps, weight}-Struktur wie Kraft-Übungen (reps=Runden, weight=Kalorien),
+// Intervall-Block (Airbike): Karte mit Timer + Ergebnis-Eintrag (Runden, Kalorien, Peak-Watt) für den
+// Wochenvergleich. Nutzt die {reps, weight}-Struktur der Kraft-Übungen (reps=Runden, weight=Kalorien) plus watts,
 // damit Verlauf und Vorbelegung wiederverwendet werden. Gespeichert wird nur, was aktiv eingetippt wurde.
-function intervalBlockCards(ib, state) {
+function intervalBlockCards(ib, day, state) {
   const accent = ib.badgeColor || "orange";
+  const sinceStart = getLastSessionsForDay(day.id, 99).filter((l) => !PLAN.startDate || l.dateISO.slice(0, 10) >= PLAN.startDate).length;
+  const useAdvanced = !!ib.advanced && sinceStart >= ib.advanced.afterSessions;
+  const rounds = useAdvanced ? ib.advanced.rounds : ib.baseRounds;
+
   const timerCard = el(`
     <div class="card card-accent-${accent}">
       <div class="ex-header">
@@ -460,7 +467,7 @@ function intervalBlockCards(ib, state) {
       </div>
       <div class="stat-row">
         <div class="stat-box"><div class="stat-label">Dauer</div><div class="stat-value orange">${ib.totalLabel}</div></div>
-        <div class="stat-box"><div class="stat-label">Runden</div><div class="stat-value">${ib.baseRounds}</div></div>
+        <div class="stat-box"><div class="stat-label">Runden</div><div class="stat-value">${rounds}${useAdvanced ? ` (${ib.advanced.badge})` : ""}</div></div>
         <div class="stat-box"><div class="stat-label">Sprint/Locker</div><div class="stat-value">${ib.workSeconds}/${ib.restSeconds}s</div></div>
       </div>
       <div class="footer-note">→ ${ib.footerNote}</div>
@@ -469,48 +476,119 @@ function intervalBlockCards(ib, state) {
   `);
   timerCard.querySelector('[data-action="start"]').addEventListener("click", () => {
     const phases = [];
-    for (let r = 1; r <= ib.baseRounds; r++) {
-      phases.push({ label: `Sprint · Runde ${r}/${ib.baseRounds}`, seconds: ib.workSeconds, kind: "work" });
-      phases.push({ label: `Locker · Runde ${r}/${ib.baseRounds}`, seconds: ib.restSeconds, kind: "rest" });
+    for (let r = 1; r <= rounds; r++) {
+      phases.push({ label: `Sprint · Runde ${r}/${rounds}`, seconds: ib.workSeconds, kind: "work" });
+      phases.push({ label: `Locker · Runde ${r}/${rounds}`, seconds: ib.restSeconds, kind: "rest" });
     }
     playIntervalProgram(phases, { onAllDone: () => {} });
   });
 
   const resultCard = el(`<div class="card"></div>`);
   resultCard.appendChild(el(`<div class="ex-name" style="margin-bottom:2px">${ib.label}: Ergebnis eintragen</div>`));
-  resultCard.appendChild(el(`<div class="ex-cue" style="margin-bottom:10px">Für den Vergleich zur nächsten Woche</div>`));
+  resultCard.appendChild(el(`<div class="ex-cue" style="margin-bottom:10px">Für den Vergleich zur nächsten Woche — graue Zahl = Vorwoche</div>`));
 
-  const lastSets = getLastMovementSets(ib.id, 0);
+  const last = getLastMovementSets(ib.id, 0)?.[0];
   const row = el(`
-    <div class="form-grid" style="margin-bottom:0">
-      <div class="field"><label>Geschaffte Runden</label><input type="number" inputmode="numeric" data-role="rounds" placeholder="${ib.baseRounds}" /></div>
-      <div class="field"><label>Kalorien gesamt</label><input type="number" inputmode="numeric" data-role="kcal" placeholder="z. B. 140" /></div>
+    <div class="form-grid" style="margin-bottom:0;grid-template-columns:1fr 1fr 1fr">
+      <div class="field"><label>Runden</label><input type="number" inputmode="numeric" data-role="rounds" placeholder="${rounds}" /></div>
+      <div class="field"><label>Kalorien</label><input type="number" inputmode="numeric" data-role="kcal" placeholder="z. B. 140" /></div>
+      <div class="field"><label>Peak Watt</label><input type="number" inputmode="numeric" data-role="watts" placeholder="204" /></div>
     </div>
   `);
-  const roundsInput = row.querySelector('[data-role="rounds"]');
-  const kcalInput = row.querySelector('[data-role="kcal"]');
-  if (lastSets?.[0]?.reps != null) roundsInput.value = lastSets[0].reps;
-  if (lastSets?.[0]?.weight != null) kcalInput.value = lastSets[0].weight;
-
-  const sync = () => {
-    state.entries[ib.id] = {
-      movements: [
-        {
-          sets: [
-            {
-              reps: roundsInput.value ? Number(roundsInput.value) : null,
-              weight: kcalInput.value ? Number(kcalInput.value) : null,
-            },
-          ],
-        },
-      ],
-    };
-  };
-  roundsInput.addEventListener("input", sync);
-  kcalInput.addEventListener("input", sync);
+  const inputs = { reps: row.querySelector('[data-role="rounds"]'), weight: row.querySelector('[data-role="kcal"]'), watts: row.querySelector('[data-role="watts"]') };
+  Object.entries(inputs).forEach(([key, input]) => {
+    if (last?.[key] != null) input.placeholder = `Vorwoche ${last[key]}`;
+    input.addEventListener("input", () => {
+      const val = (i) => (i.value ? Number(i.value) : null);
+      state.entries[ib.id] = { movements: [{ sets: [{ reps: val(inputs.reps), weight: val(inputs.weight), watts: val(inputs.watts) }] }] };
+    });
+  });
   resultCard.appendChild(row);
 
   return [timerCard, resultCard];
+}
+
+// Circuit (z. B. B1–B5 × 3 Runden): Timer-Karte + Tabelle zum Eintragen der Wdh. je Übung und Runde,
+// vorbelegt mit den Werten der letzten Einheit. Es wird nur gespeichert, was eingetippt wurde.
+function circuitCards(cb, state) {
+  const timerCard = el(`
+    <div class="card card-accent-purple">
+      <div class="ex-header">
+        <div class="badge badge-purple">${cb.badge}</div>
+        <div><div class="ex-name">Circuit · ${cb.rounds} Runden</div><div class="ex-cue">Ohne Pause durch ${cb.exercises[0].badge}–${cb.exercises.at(-1).badge}, danach ${cb.roundRestSeconds}s Pause</div></div>
+      </div>
+      <div class="circuit-exlist">
+        ${cb.exercises.map((e) => `<div class="row"><div class="badge badge-${e.badgeColor}" style="width:28px;height:28px;font-size:11px">${e.badge}</div><div><b>${e.name}</b> <span style="color:var(--text-faint)">— ${e.loadLabel}</span><div style="color:var(--text-dim);font-size:12px">${e.cue}</div></div></div>`).join("")}
+      </div>
+      <button class="btn btn-primary" style="margin-top:12px" data-action="start">Circuit-Timer starten</button>
+    </div>
+  `);
+  timerCard.querySelector('[data-action="start"]').addEventListener("click", () => {
+    const phases = [];
+    for (let r = 1; r <= cb.rounds; r++) {
+      cb.exercises.forEach((e) => phases.push({ label: `${e.badge} · ${e.name} (Runde ${r}/${cb.rounds})`, seconds: e.workSeconds, kind: "work" }));
+      if (r < cb.rounds) phases.push({ label: `Pause vor Runde ${r + 1}`, seconds: cb.roundRestSeconds, kind: "rest" });
+    }
+    playIntervalProgram(phases, { onAllDone: () => {} });
+  });
+
+  const logCard = el(`<div class="card"></div>`);
+  logCard.appendChild(el(`<div class="ex-name" style="margin-bottom:2px">Wiederholungen pro Runde</div>`));
+  logCard.appendChild(el(`<div class="ex-cue" style="margin-bottom:10px">Geschaffte Wdh. je Runde eintragen — graue Zahl = Vorwoche</div>`));
+  const table = el(`<table class="set-table"><thead><tr><th></th>${Array.from({ length: cb.rounds }, (_, i) => `<th>Runde ${i + 1}</th>`).join("")}</tr></thead><tbody></tbody></table>`);
+  const tbody = table.querySelector("tbody");
+  cb.exercises.forEach((ex) => {
+    const lastSets = getLastMovementSets(ex.id, 0);
+    const row = el(`<tr class="set-row"><td class="set-idx" style="text-align:left;width:auto;white-space:nowrap"><b>${ex.badge}</b> <span style="color:var(--text-faint);font-size:11px">${ex.name}</span></td></tr>`);
+    for (let r = 0; r < cb.rounds; r++) {
+      const td = document.createElement("td");
+      const input = document.createElement("input");
+      input.className = "num-input";
+      input.type = "number";
+      input.inputMode = "numeric";
+      if (lastSets?.[r]?.reps != null) input.placeholder = lastSets[r].reps;
+      input.addEventListener("input", () => {
+        state.entries[ex.id] = state.entries[ex.id] || { movements: [{ sets: [] }] };
+        state.entries[ex.id].movements[0].sets[r] = { reps: input.value ? Number(input.value) : null, weight: null };
+      });
+      td.appendChild(input);
+      row.appendChild(td);
+    }
+    tbody.appendChild(row);
+  });
+  logCard.appendChild(table);
+  return [timerCard, logCard];
+}
+
+// Finisher (z. B. Rudern 5 × 250 m): Zeit je Intervall eintragen, mit Pausen-Timer.
+function finisherCard(f, state) {
+  const card = el(`<div class="card"></div>`);
+  card.appendChild(el(`<div class="ex-name">${f.label}</div>`));
+  card.appendChild(el(`<div class="footer-note" style="margin-top:2px;margin-bottom:10px">${f.detail}</div>`));
+  const lastSets = getLastMovementSets(f.id, 0);
+  const table = el(`<table class="set-table"><thead><tr><th></th>${Array.from({ length: f.reps }, (_, i) => `<th>${i + 1}. ${f.distanceLabel}</th>`).join("")}</tr></thead><tbody><tr class="set-row"><td class="set-idx">Sek</td></tr></tbody></table>`);
+  const row = table.querySelector("tr.set-row");
+  for (let i = 0; i < f.reps; i++) {
+    const td = document.createElement("td");
+    const input = document.createElement("input");
+    input.className = "num-input";
+    input.type = "number";
+    input.inputMode = "numeric";
+    input.placeholder = lastSets?.[i]?.reps ?? f.targetSeconds;
+    input.addEventListener("input", () => {
+      state.entries[f.id] = state.entries[f.id] || { movements: [{ sets: [] }] };
+      state.entries[f.id].movements[0].sets[i] = { reps: input.value ? Number(input.value) : null, weight: null };
+    });
+    td.appendChild(input);
+    row.appendChild(td);
+  }
+  card.appendChild(table);
+  if (f.pauseSeconds) {
+    const btn = el(`<button class="btn btn-secondary" style="margin-top:12px">Pause starten (${f.pauseSeconds} Sek)</button>`);
+    btn.addEventListener("click", () => showRestTimer(f.pauseSeconds, { label: `Pause · ${f.label}` }));
+    card.appendChild(btn);
+  }
+  return card;
 }
 
 export function renderDayTrainer(container, dayId, navigate) {
@@ -527,7 +605,9 @@ export function renderDayTrainer(container, dayId, navigate) {
   queue.forEach((item) => {
     if (item.type === "chainPair") container.appendChild(chainPairCard(item.ex1, item.ex2, state));
     else if (item.type === "multiMovement") container.appendChild(multiMovementCard(item.ex, state));
-    else if (item.type === "interval") intervalBlockCards(item.ex, state).forEach((card) => container.appendChild(card));
+    else if (item.type === "interval") intervalBlockCards(item.ex, day, state).forEach((card) => container.appendChild(card));
+    else if (item.type === "circuit") circuitCards(item.ex, state).forEach((card) => container.appendChild(card));
+    else if (item.type === "finisher") container.appendChild(finisherCard(item.ex, state));
     else container.appendChild(singleExerciseCard(item.ex, state));
   });
 

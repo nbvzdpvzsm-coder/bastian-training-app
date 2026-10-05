@@ -330,3 +330,8 @@ body.tv-mode .timer-clock { font-size: 120px; }
 .circuit-exlist .row.active { color: var(--orange); font-weight: 700; }
 
 a { color: var(--orange); }
+
+/* Karten mit 3+ Bewegungen: engere Spalten, damit alles auf das Handy passt */
+.set-table.dense .num-input { padding: 10px 2px; font-size: 15px; }
+.set-table.dense .set-row td, .set-table.dense th { padding-left: 2px; padding-right: 2px; }
+.set-table.dense .set-check { width: 30px; height: 30px; }
