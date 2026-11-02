@@ -68,7 +68,7 @@ function getLastMovementSets(recordId, movementIdx) {
 function pruneEntries(entries) {
   const pruned = {};
   Object.entries(entries).forEach(([id, data]) => {
-    const hasData = (data.movements || []).some((mv) => (mv.sets || []).some((s) => s && (s.reps != null || s.weight != null || s.watts != null)));
+    const hasData = (data.movements || []).some((mv) => (mv.sets || []).some((s) => s && (s.reps != null || s.weight != null || s.watts != null || s.bpm != null)));
     if (hasData) pruned[id] = data;
   });
   return pruned;
@@ -117,7 +117,7 @@ function buildSetRows(exercise, movement, movementIdx, state, recordId = exercis
   const wrap = el(`<table class="set-table"><thead><tr>
       <th></th>
       ${showWeight ? `<th>${loadUnitLabel(loadType)}</th>` : ""}
-      <th>Wdh.</th>
+      <th>${movement.repType === "time" ? "Sek" : "Wdh."}</th>
       <th></th>
     </tr></thead><tbody></tbody></table>`);
   const tbody = wrap.querySelector("tbody");
@@ -132,7 +132,7 @@ function buildSetRows(exercise, movement, movementIdx, state, recordId = exercis
       <tr class="set-row">
         <td class="set-idx">${i + 1}</td>
         ${showWeight ? `<td><input class="num-input" inputmode="decimal" type="number" step="0.5" placeholder="${target?.weightKg ?? "–"}" data-role="weight" /></td>` : ""}
-        <td><input class="num-input" inputmode="numeric" type="number" placeholder="${movement.repType === "range" ? movement.repMax : movement.repFixed || ""}" data-role="reps" /></td>
+        <td><input class="num-input" inputmode="numeric" type="number" placeholder="${movement.repMax ?? movement.repFixed ?? ""}" data-role="reps" /></td>
         <td><button class="set-check" type="button" data-role="check">✓</button></td>
       </tr>
     `);
@@ -163,7 +163,7 @@ function buildSetRows(exercise, movement, movementIdx, state, recordId = exercis
       checkBtn.disabled = true;
       pristine.delete(i);
       const isLast = i === movement.sets - 1;
-      if (!isLast) {
+      if (!isLast && exercise.pauseSeconds !== 0) {
         showRestTimer(effectiveRestSeconds(exercise.pauseSeconds), {
           label: `Pause · ${exercise.name}`,
           onDone: () => {
@@ -197,8 +197,8 @@ function singleExerciseCard(exercise, state) {
     card.appendChild(buildSetRows(exercise, movement, idx, state));
   });
 
-  const pauseText = exercise.chainNext ? "Direkt weiter zur nächsten Übung" : `Pause: ${exercise.pauseLabel}`;
-  card.appendChild(el(`<div class="footer-note">→ ${exercise.footerNote}<br/><span style="opacity:0.7">${pauseText}</span></div>`));
+  const pauseText = exercise.chainNext ? "Direkt weiter zur nächsten Übung" : exercise.pauseSeconds === 0 ? "Keine Pause" : `Pause: ${exercise.pauseLabel}`;
+  card.appendChild(el(`<div class="footer-note">${exercise.footerNote ? `→ ${exercise.footerNote}<br/>` : ""}<span style="opacity:0.7">${pauseText}</span></div>`));
   return card;
 }
 
@@ -267,7 +267,7 @@ function renderRoundBasedCard({ parts, pauseSeconds, headerHtml, footerHtml, acc
       repsInput.type = "number";
       repsInput.inputMode = "numeric";
       if (!active) repsInput.disabled = true;
-      repsInput.placeholder = p.movement.repType === "range" ? p.movement.repMax : p.movement.repFixed || "";
+      repsInput.placeholder = p.movement.repMax ?? p.movement.repFixed ?? "";
       if (lastSet?.reps != null) repsInput.value = lastSet.reps;
       repsTd.appendChild(repsInput);
       cellsBeforeCheck.push(repsTd);
@@ -339,7 +339,7 @@ function chainPairCard(ex1, ex2, state) {
       </div>
     </div>
   `;
-  const footerHtml = `<div class="footer-note">→ ${ex1.footerNote}<br/>→ ${ex2.footerNote}<br/><span style="opacity:0.7">Danach ${ex2.pauseLabel} Pause</span></div>`;
+  const footerHtml = `<div class="footer-note">${[ex1.footerNote, ex2.footerNote].filter(Boolean).map((n) => `→ ${n}<br/>`).join("")}<span style="opacity:0.7">Danach ${ex2.pauseLabel} Pause</span></div>`;
   return renderRoundBasedCard({
     parts,
     pauseSeconds: ex2.pauseSeconds,
@@ -370,7 +370,7 @@ function multiMovementCard(exercise, state) {
       </div>
     </div>
   `;
-  const footerHtml = `<div class="footer-note">→ ${exercise.footerNote}<br/><span style="opacity:0.7">Pause: ${exercise.pauseLabel}</span></div>`;
+  const footerHtml = `<div class="footer-note">${exercise.footerNote ? `→ ${exercise.footerNote}<br/>` : ""}<span style="opacity:0.7">Pause: ${exercise.pauseLabel}</span></div>`;
   return renderRoundBasedCard({
     parts,
     pauseSeconds: exercise.pauseSeconds,
@@ -591,6 +591,60 @@ function finisherCard(f, state) {
   return card;
 }
 
+// Ausdauer-Block (z. B. Zone 2): Timer + Ergebnis (Minuten, Ø Puls, Kalorien). Wie bei den anderen Blöcken werden
+// Vorwochenwerte nur als graue Hinweise gezeigt; gespeichert wird, was eingetippt wurde.
+function enduranceCards(ed, state) {
+  const accent = ed.badgeColor || "orange";
+  const timerCard = el(`
+    <div class="card card-accent-${accent}">
+      <div class="ex-header">
+        <div class="badge badge-${accent}">${ed.badge}</div>
+        <div><div class="ex-name">${ed.label}</div><div class="ex-cue">${ed.cue}</div></div>
+      </div>
+      <div class="stat-row">
+        <div class="stat-box"><div class="stat-label">Dauer</div><div class="stat-value orange">${ed.minutes} Min</div></div>
+        <div class="stat-box"><div class="stat-label">Puls</div><div class="stat-value">${ed.targetLabel}</div></div>
+      </div>
+      <div class="footer-note">→ ${ed.footerNote}</div>
+      <button class="btn btn-primary" style="margin-top:12px" data-action="start">${ed.minutes}-Min-Timer starten</button>
+    </div>
+  `);
+  timerCard.querySelector('[data-action="start"]').addEventListener("click", () => {
+    playIntervalProgram([{ label: ed.label, seconds: ed.minutes * 60, kind: "work" }], { onAllDone: () => {} });
+  });
+
+  const resultCard = el(`<div class="card"></div>`);
+  resultCard.appendChild(el(`<div class="ex-name" style="margin-bottom:2px">Ausdauer: Ergebnis eintragen</div>`));
+  resultCard.appendChild(el(`<div class="ex-cue" style="margin-bottom:10px">Graue Zahl = letztes Mal</div>`));
+  const last = getLastMovementSets(ed.id, 0)?.[0];
+  const row = el(`
+    <div class="form-grid" style="margin-bottom:0;grid-template-columns:1fr 1fr 1fr">
+      <div class="field"><label>Minuten</label><input type="number" inputmode="numeric" data-key="reps" placeholder="${ed.minutes}" /></div>
+      <div class="field"><label>Ø Puls</label><input type="number" inputmode="numeric" data-key="bpm" placeholder="z. B. 125" /></div>
+      <div class="field"><label>Kalorien</label><input type="number" inputmode="numeric" data-key="weight" placeholder="optional" /></div>
+    </div>
+  `);
+  const inputs = Object.fromEntries([...row.querySelectorAll("input")].map((i) => [i.dataset.key, i]));
+  Object.entries(inputs).forEach(([key, input]) => {
+    if (last?.[key] != null) input.placeholder = `Zuletzt ${last[key]}`;
+    input.addEventListener("input", () => {
+      const val = (i) => (i.value ? Number(i.value) : null);
+      state.entries[ed.id] = { movements: [{ sets: [{ reps: val(inputs.reps), weight: val(inputs.weight), bpm: val(inputs.bpm) }] }] };
+    });
+  });
+  resultCard.appendChild(row);
+  return [timerCard, resultCard];
+}
+
+function cooldownCard(cd) {
+  return el(`
+    <div class="warmup-card cooldown-card">
+      <div class="warmup-title">COOL-DOWN — ${cd.minutes} MIN</div>
+      <ul>${cd.items.map((i) => `<li>${i}</li>`).join("")}</ul>
+    </div>
+  `);
+}
+
 export function renderDayTrainer(container, dayId, navigate) {
   const day = getDay(dayId);
   if (!day) return renderDayList(container, navigate);
@@ -608,8 +662,11 @@ export function renderDayTrainer(container, dayId, navigate) {
     else if (item.type === "interval") intervalBlockCards(item.ex, day, state).forEach((card) => container.appendChild(card));
     else if (item.type === "circuit") circuitCards(item.ex, state).forEach((card) => container.appendChild(card));
     else if (item.type === "finisher") container.appendChild(finisherCard(item.ex, state));
+    else if (item.type === "endurance") enduranceCards(item.ex, state).forEach((card) => container.appendChild(card));
     else container.appendChild(singleExerciseCard(item.ex, state));
   });
+
+  if (day.cooldown) container.appendChild(cooldownCard(day.cooldown));
 
   const notesCard = el(`
     <div class="target-panel">

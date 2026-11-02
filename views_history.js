@@ -34,6 +34,11 @@ function entryBlock(log, exId, data) {
     if (!s) return null;
     name = ex.label;
     rows = [`${s.reps ?? "–"} Runden · ${s.weight ?? "–"} kcal${s.watts != null ? ` · Peak ${s.watts} W` : ""}`];
+  } else if (found?.kind === "endurance") {
+    const s = allSets[0];
+    if (!s) return null;
+    name = ex.label;
+    rows = [[s.reps != null ? `${s.reps} Min` : null, s.bpm != null ? `Ø ${s.bpm} bpm` : null, s.weight != null ? `${s.weight} kcal` : null].filter(Boolean).join(" · ")];
   } else if (found?.kind === "circuitEx") {
     if (allSets.length === 0) return null;
     name = `${ex.badge} ${ex.name}`;

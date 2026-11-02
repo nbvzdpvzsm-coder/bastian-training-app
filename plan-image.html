@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<title>Trainingsplan-Bild</title>
+<!-- Rendert einen Trainingstag aus data.js im Querformat (2000×1125) im App-Design: plan-image.html?day=<dayId> -->
+<style>
+  :root { --orange:#e8590c; --purple:#7c3aed; --green:#16a34a; --text:#f2f4f8; --dim:#9aa3b8; --faint:#6f7890; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 2000px; height: 1125px; background: #262d3d; color: var(--text); font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; overflow: hidden; }
+  .page { width: 2000px; height: 1125px; display: flex; flex-direction: column; background: linear-gradient(180deg,#232a3b,#2a3142); }
+  header { position: relative; height: 134px; background: #1e2535; border-bottom: 5px solid var(--orange); padding: 20px 42px 0; flex-shrink: 0; }
+  header h1 { font-size: 62px; font-weight: 800; letter-spacing: 1px; line-height: 1; }
+  header .sub { position: absolute; left: 42px; bottom: 14px; font-size: 29px; color: #f5882b; }
+  header .meta { position: absolute; right: 42px; top: 26px; text-align: right; font-size: 24px; color: var(--faint); line-height: 1.35; letter-spacing: .5px; }
+  main { flex: 1; display: flex; gap: 36px; padding: 16px 37px 14px; min-height: 0; }
+  .col { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .warm { background: linear-gradient(180deg,#4a3410,#3a2a12); border: 2px solid #e8a21a; border-left-width: 9px; border-radius: 12px; padding: 14px 20px 14px 18px; }
+  .warm.cool { background: linear-gradient(180deg,#143440,#102830); border-color: #38b2ac; }
+  .warm h2 { font-size: 27px; font-weight: 800; color: #f59e0b; letter-spacing: .5px; margin-bottom: 6px; }
+  .warm.cool h2 { color: #4fd1c5; }
+  .warm li { list-style: none; font-size: 23px; line-height: 1.38; color: #f2e2b4; }
+  .warm.cool li { color: #c9e6ea; }
+  .warm li::before { content: "•"; margin-right: 14px; }
+  .card { background: #3b4357; border: 1.5px solid #465068; border-radius: 12px; padding: 11px 20px 9px 18px; }
+  .card .top { display: flex; gap: 16px; align-items: flex-start; }
+  .badge { flex: 0 0 auto; width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; color: #fff; }
+  .b-orange { background: var(--orange); } .b-purple { background: var(--purple); } .b-green { background: var(--green); }
+  .card h3 { font-size: 31px; font-weight: 700; line-height: 1.15; }
+  .card .cue { font-size: 21px; color: var(--dim); margin-top: 2px; }
+  .chips { display: flex; gap: 12px; margin: 9px 0 6px 64px; }
+  .chip { background: #151a28; border-radius: 8px; padding: 5px 12px 6px; min-width: 172px; }
+  .chip .l { font-size: 15px; letter-spacing: .6px; color: var(--faint); text-transform: uppercase; }
+  .chip .v { font-size: 22px; font-weight: 800; }
+  .c-orange { color: #f26a1b; } .c-purple { color: #8b6cf5; } .c-green { color: #22c55e; }
+  .note { margin-left: 64px; font-size: 17px; color: var(--faint); }
+  .note::before { content: "→ "; }
+  .panel { flex: 1; min-height: 0; border: 3px solid #1f9d6a; background: #14281f; border-radius: 12px; padding: 14px 22px; display: flex; flex-direction: column; gap: 12px; }
+  .panel h2 { font-size: 26px; font-weight: 800; color: #22c55e; letter-spacing: .5px; }
+  .panel .sec { font-size: 23px; line-height: 1.4; color: #dff5e6; }
+  .panel .sec b { color: #4fd1c5; display: block; font-size: 19px; letter-spacing: .6px; margin-bottom: 2px; }
+  .panel .rule { height: 1px; background: #2c5a44; }
+  .panel .hint { font-size: 22px; color: #cfe3d6; line-height: 1.4; }
+  footer { height: 44px; background: #1e2535; border-top: 4px solid var(--orange); text-align: center; font-size: 23px; color: var(--faint); letter-spacing: .6px; line-height: 40px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div class="page" id="page"></div>
+<script type="module">
+import { PLAN, getDay } from "./data.js";
+import { repLabel } from "./utils.js";
+
+const dayId = new URLSearchParams(location.search).get("day") || PLAN.days[0].id;
+const day = getDay(dayId);
+const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const up = (t) => esc(t).toUpperCase();
+const color = (c) => ({ orange: "orange", purple: "purple", green: "green" }[c] || "orange");
+
+function chip(label, value, c) {
+  return `<div class="chip"><div class="l">${label}</div><div class="v c-${c}">${esc(value)}</div></div>`;
+}
+
+function card(ex) {
+  const c = color(ex.badgeColor);
+  if (ex.type === "endurance") {
+    return `<div class="card"><div class="top"><div class="badge b-${c}">${esc(ex.badge)}</div><div><h3>${esc(ex.label)}</h3><div class="cue">${esc(ex.cue)}</div></div></div>
+      <div class="chips">${chip("Dauer", ex.minutes + " Min", c)}${chip("Modus", "Zone 2", c)}${chip("Puls", ex.targetLabel, c)}</div>
+      ${ex.footerNote ? `<div class="note">${esc(ex.footerNote)}</div>` : ""}</div>`;
+  }
+  if (ex.type) return "";
+  const m = ex.movements[0];
+  return `<div class="card"><div class="top"><div class="badge b-${c}">${esc(ex.badge)}</div><div><h3>${esc(ex.name)}</h3><div class="cue">${esc(ex.cue || "")}</div></div></div>
+    <div class="chips">${chip("Sätze", m.sets + " Sätze", c)}${chip("Wdhl.", repLabel(m), c)}${chip("Pause", ex.pauseLabel, c)}</div>
+    ${ex.footerNote ? `<div class="note">${esc(ex.footerNote)}</div>` : ""}</div>`;
+}
+
+const shown = day.exercises.filter((ex) => card(ex));
+const cards = shown.map(card);
+let k = Math.ceil(cards.length / 2);
+if (shown[k - 1]?.chainNext) k -= 1; // Supersatz-Paare nicht auf zwei Spalten verteilen
+const warm = `<div class="warm"><h2>WARM-UP — ${up(day.warmup.minutes)} MIN</h2><ul>${day.warmup.items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul></div>`;
+const few = cards.length <= 4; // wenige Karten: Cool-down als eigene Karte links, sonst im Hinweis-Feld rechts
+const coolCard = day.cooldown ? `<div class="warm cool"><h2>COOL-DOWN — ${up(day.cooldown.minutes)} MIN</h2><ul>${day.cooldown.items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul></div>` : "";
+const cool = day.cooldown && !few ? `<div class="sec"><b>COOL-DOWN — ${up(day.cooldown.minutes)} MIN</b>${day.cooldown.items.map(esc).join("<br>")}</div>` : "";
+const notes = (day.progressionNotes || []).map((n) => `<div class="hint">${esc(n)}</div>`).join("");
+const panel = `<div class="panel"><h2>${up(day.notesTitle || "HINWEIS")}</h2>${cool}${cool && notes ? '<div class="rule"></div>' : ""}${notes}</div>`;
+
+const dur = day.durationLabel ? ` • ${day.durationLabel.replace("MIN", "Min")}` : "";
+document.getElementById("page").innerHTML = `
+  <header>
+    <h1>TAG ${day.dayNumber} &nbsp;—&nbsp; ${up(day.title)}</h1>
+    <div class="sub">${esc(day.subtitle)}</div>
+    <div class="meta">BASTIAN &nbsp;•&nbsp; HOME GYM &nbsp;•&nbsp; AB ${PLAN.startDate.split("-").reverse().join(".")}<br>${esc(day.warmup.minutes)} Min Warm-Up &nbsp;+&nbsp; Hauptblock${dur}</div>
+  </header>
+  <main>
+    <div class="col">${warm}${cards.slice(0, k).join("")}${few ? coolCard : ""}</div>
+    <div class="col">${cards.slice(k).join("")}${panel}</div>
+  </main>
+  <footer>BASTIAN &nbsp;•&nbsp; ${up(PLAN.cycleLabel)} &nbsp;•&nbsp; TAG ${day.dayNumber} &nbsp;—&nbsp; ${up(day.title)}</footer>`;
+document.title = "ready";
+</script>
+</body>
+</html>

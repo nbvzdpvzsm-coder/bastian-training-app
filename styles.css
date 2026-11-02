@@ -335,3 +335,7 @@ a { color: var(--orange); }
 .set-table.dense .num-input { padding: 10px 2px; font-size: 15px; }
 .set-table.dense .set-row td, .set-table.dense th { padding-left: 2px; padding-right: 2px; }
 .set-table.dense .set-check { width: 30px; height: 30px; }
+
+.cooldown-card { background: linear-gradient(180deg, #14303a, #10252d); border-color: #1f4a58; margin-top: 16px; }
+.cooldown-card .warmup-title { color: #4fd1c5; }
+.cooldown-card ul { color: #c9e6ea; }
