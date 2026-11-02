@@ -21,7 +21,7 @@ export const PLAN = {
   startDate: "2026-11-02",
   overview: {
     strategy: "Neuer Plan ab 02.11.2026: Ganzkörper A/B, Ausdauer + Core und Oberkörper + Arme.",
-    schedule: ["Mo Ganzkörper A · Di Ausdauer + Core", "Do Ganzkörper B · Fr Oberkörper + Arme", "Mittwoch: im Plan nicht vorgesehen"],
+    schedule: ["Mo Ganzkörper A · Di Ausdauer + Core", "Do Ganzkörper B · Fr Oberkörper + Arme", "Mittwoch: Ruhetag"],
   },
   changeNotes: [
     {
@@ -401,7 +401,15 @@ export const PLAN = {
           progression: { strategy: "range-weight", incrementKg: 2.5, cadenceWeeks: 2, role: "assist" },
         },
       ],
-      cooldown: { minutes: "5", items: ["Locker bewegen • Schulter-/Brustwirbelsäulen-Mobilität"] },
+      cooldown: {
+        minutes: "5",
+        items: [
+          "2 Minuten: Lockeres Gehen oder sehr leichtes AirBike.",
+          "1 Minute: Brust- und Schulterdehnung, jeweils 30 Sekunden pro Seite.",
+          "1 Minute: Sanfte Bizeps- und Trizepsdehnung.",
+          "1 Minute: Lockerung und Mobilisation der Schultergelenke.",
+        ],
+      },
       notesTitle: "HINWEIS",
       progressionNotes: ["Falls kein Neutralgriff: schmerzfreie Klimmzug- oder Ring-Row-Variante."],
     },
